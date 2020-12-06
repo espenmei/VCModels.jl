@@ -34,12 +34,17 @@ end
 # Fields
 - `Λ`:Cholesky object of the model covariance matrix
 """
-mutable struct VCMat{T<:AbstractFloat}
+#mutable struct VCMat{T<:AbstractFloat}
+#    Λ::Cholesky{T}
+#end
+
+struct VCMat{T<:AbstractFloat}
     Λ::Cholesky{T}
 end
 
 function VCMat(n::Int)
-    Λ_init = cholesky(Diagonal(ones(n)))
+    #Λ_init = cholesky(Diagonal(ones(n)))
+    Λ_init = cholesky!(Matrix(1.0I, n, n))
     VCMat(Λ_init)
 end
 
@@ -69,7 +74,6 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     msse = sum((d.y - d.X * (d.X \ d.y)).^2) / d.dims.n
     s = d.dims.nvcomp
     θ_init = fill(msse / s, s)
-    #push!(θ_lb, 0.0) # Add lower bound for residuals component
     VCModel(
     d,
     θ_init,
@@ -90,7 +94,6 @@ function VCModel(d::VCData, θ_lb::Vector{T}) where T<:AbstractFloat
 end
 
 function setθ!(m::VCModel, θ::Vector{T}) where T<:AbstractFloat
-    #m.θ[:] = θ
     copyto!(m.θ, θ)
     m
 end
@@ -99,7 +102,8 @@ function updateΛ!(m::VCModel)
     δ = m.tf(m.θ)
     #Σ = sum(δ .* m.data.R) # Dette er dyrt
     Σ = sum(broadcast(*, δ, m.data.R)) # Dette er dyrt
-    m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
+    cholesky!(Symmetric(copyto!(m.vc.Λ.factors, Σ), :U))
+    #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
     m
 end
 
