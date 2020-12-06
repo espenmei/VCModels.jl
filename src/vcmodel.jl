@@ -13,7 +13,7 @@ struct VCData{T<:AbstractFloat}
     dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
 end
 
-function VCData(y::Vector{T}, X::Array{T, 2}, R::Vector{AbstractArray{T, 2}}) where T<:AbstractFloat
+function VCData(y::Vector{T}, X::Array{T, 2}, R::Vector{AbstractArray{T, 2}}) where T<:AbstractFloat 
   #  Rs = Vector{AbstractArray{T, 2}}()
    # for i in R # Tag all correlation matrices as Hermition. Note that the matrix may change if not.
     #    push!(Rs, Hermitian(i))
@@ -28,27 +28,15 @@ function VCData(y::Vector{T}, X::Array{T, 2}, R::Vector{AbstractArray{T, 2}}) wh
     )
 end
 
-# Mutable so that parameters can be updated during optimization
 """
-`VCMat` holds the model implied covariance matrix as a cholesky object
+`VCMat` holds the model implied covariance matrix.
 # Fields
 - `Λ`: cholesky object of the model covariance matrix
 - `Σ`: model covariance matrix
 """
-#mutable struct VCMat{T<:AbstractFloat}
-#    Λ::Cholesky{T}
-#end
-
 struct VCMat{T<:AbstractFloat}
     Λ::Cholesky{T}
     Σ::Matrix{T}
-end
-
-function VCMat(n::Int)
-    #Λ_init = cholesky(Diagonal(ones(n)))
-    Λ_init = cholesky!(Matrix(1.0I, n, n))
-    Σ_init = Matrix{Float64}(undef, n, n) # Fix type 
-    VCMat(Λ_init, Σ_init)
 end
 
 """
@@ -77,36 +65,35 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     msse = sum((d.y - d.X * (d.X \ d.y)).^2) / d.dims.n
     s = d.dims.nvcomp
     θ_init = fill(msse / s, s)
+    n = d.dims.n
     VCModel(
     d,
     θ_init,
     θ_lb,
-    VCMat(d.dims.n),
+    VCMat(cholesky!(Matrix{T}(1.0I, n, n)), Matrix{T}(undef, n, n)),
     Array{Union{Missing, T}}(missing, 2, 2),
     tf,
     OptSummary(θ_init, θ_lb)
     )
 end
 
-function VCModel(d::VCData, θ_lb::Vector{T}) where T<:AbstractFloat
+function VCModel(d::VCData, θ_lb::Vector{T}) where T<:Real # AbstractFloat
     VCModel(
     d,
     θ_lb,
-    (θ)::Vector{T} -> θ
+    (θ::Vector{T}) -> θ # Just set to identity
     )
 end
 
-function setθ!(m::VCModel, θ::Vector{T}) where T<:AbstractFloat
+function setθ!(m::VCModel, θ::Vector)
     copyto!(m.θ, θ)
     m
 end
 
 function updateΛ!(m::VCModel)
     δ = m.tf(m.θ)
-    #Σ = sum(δ .* m.data.R) # Dette er dyrt
     #Σ = sum(broadcast(*, δ, m.data.R)) # Dette er dyrt
-    #Σ = Matrix{Float64}(undef, n, n)
-    fill!(m.vc.Σ,zero(eltype(m.vc.Σ))) # Reset all values in Σ to zero
+    fill!(m.vc.Σ, zero(eltype(m.θ))) # Reset all values in Σ to zero
     for i in 1:m.data.dims.nvcomp
         mul!(m.vc.Σ, δ[i], m.data.R[i], 1.0, 1.0)
     end
@@ -152,9 +139,9 @@ function fixef(m::VCModel)
    #  inv(XtΣinvX) * XtΣinvy
 end
 
-function ranef(m::VCModel)
+function ranef(m::VCModel{T}) where T
     nvcomp = m.data.dims.nvcomp
-    U = Array{Float64}(undef, m.data.dims.n, nvcomp)
+    U = Matrix{T}(undef, m.data.dims.n, nvcomp) # Fix type
     R = m.data.R
     r = m.vc.Λ \ (m.data.y - m.data.X * VCModels.fixef(m)) # Σ^-1(y - Xβ) 
     for i in 1:length(R)
@@ -174,7 +161,6 @@ end
 
 function objective(m::VCModel)    
     log(2.0π) * m.data.dims.n + logdet(m.vc.Λ) + wrss(m)
-    #log(2.0π) * m.data.dims.n + 2*logdet(m.vc.Λ.L) + wrss(m)
 end
 
 function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bool=false)
@@ -223,7 +209,6 @@ function hessian!(m::VCModel)
         val
     end
     # Need to use opsum.final here as m.θ is not mutable?
-    #FiniteDiff.finite_difference_hessian!(m_tmp.H, l -> objective(updateΛ!(setθ!(m_tmp, l))), m_tmp.optsum.final)
     FiniteDiff.finite_difference_hessian!(m.H, obj, m_tmp.optsum.final)
     m
 end
