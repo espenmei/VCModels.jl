@@ -32,7 +32,8 @@ end
 """
 `VCMat` holds the model implied covariance matrix as a cholesky object
 # Fields
-- `Λ`:Cholesky object of the model covariance matrix
+- `Λ`: cholesky object of the model covariance matrix
+- `Σ`: model covariance matrix
 """
 #mutable struct VCMat{T<:AbstractFloat}
 #    Λ::Cholesky{T}
@@ -40,12 +41,14 @@ end
 
 struct VCMat{T<:AbstractFloat}
     Λ::Cholesky{T}
+    Σ::Matrix{T}
 end
 
 function VCMat(n::Int)
     #Λ_init = cholesky(Diagonal(ones(n)))
     Λ_init = cholesky!(Matrix(1.0I, n, n))
-    VCMat(Λ_init)
+    Σ_init = Matrix{Float64}(undef, n, n) # Fix type 
+    VCMat(Λ_init, Σ_init)
 end
 
 """
@@ -101,8 +104,14 @@ end
 function updateΛ!(m::VCModel)
     δ = m.tf(m.θ)
     #Σ = sum(δ .* m.data.R) # Dette er dyrt
-    Σ = sum(broadcast(*, δ, m.data.R)) # Dette er dyrt
-    cholesky!(Symmetric(copyto!(m.vc.Λ.factors, Σ), :U))
+    #Σ = sum(broadcast(*, δ, m.data.R)) # Dette er dyrt
+    #Σ = Matrix{Float64}(undef, n, n)
+    fill!(m.vc.Σ,zero(eltype(m.vc.Σ))) # Reset all values in Σ to zero
+    for i in 1:m.data.dims.nvcomp
+        mul!(m.vc.Σ, δ[i], m.data.R[i], 1.0, 1.0)
+    end
+    # Update the cholesky factorization object
+    cholesky!(Symmetric(copyto!(m.vc.Λ.factors, m.vc.Σ), :U))
     #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
     m
 end
@@ -216,6 +225,7 @@ function hessian!(m::VCModel)
     # Need to use opsum.final here as m.θ is not mutable?
     #FiniteDiff.finite_difference_hessian!(m_tmp.H, l -> objective(updateΛ!(setθ!(m_tmp, l))), m_tmp.optsum.final)
     FiniteDiff.finite_difference_hessian!(m.H, obj, m_tmp.optsum.final)
+    m
 end
 
 function Base.show(io::IO, m::VCModel)
