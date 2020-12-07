@@ -49,6 +49,7 @@ struct VCModel{T<:AbstractFloat}
     θ::Vector{T}
     θ_lb::Vector{T}
     vc::VCMat{T}
+    μ::Vector{T}
     H::Array{Union{Missing, T}, 2}
     tf::Function
     optsum::OptSummary
@@ -65,6 +66,7 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     θ_init,
     θ_lb,
     VCMat(cholesky!(Matrix{T}(1.0I, n, n)), Matrix{T}(undef, n, n)),
+    Vector{T}(undef, n),
     Array{Union{Missing, T}}(missing, 2, 2),
     tf,
     OptSummary(θ_init, θ_lb)
@@ -92,7 +94,14 @@ function updateΛ!(m::VCModel)
         mul!(m.vc.Σ, δ[i], m.data.R[i], 1.0, 1.0)
     end
     # Update the cholesky factorization object
-    cholesky!(Symmetric(copyto!(m.vc.Λ.factors, m.vc.Σ), :U)) #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
+    copyto!(m.vc.Λ.factors, m.vc.Σ)
+    cholesky!(Symmetric(m.vc.Λ.factors, :U))
+    #cholesky!(Symmetric(copyto!(m.vc.Λ.factors, m.vc.Σ), :U)) #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
+    m
+end
+
+function updateμ!(m::VCModel)
+    mul!(m.μ, m.data.X, fixef(m))
     m
 end
 
@@ -148,7 +157,8 @@ end
 function wrss(m::VCModel) # (y - Xβ)'Σ^-1(y - Xβ) - r'r / n = residual var
     #r = m.vc.Λ.L \ (m.data.y - m.data.X * fixef(m))
     #r ⋅ r #
-    r = m.data.y - m.data.X * VCModels.fixef(m)
+    #r = m.data.y - m.data.X * fixef(m)
+    r = m.data.y - m.μ
     dot(r, m.vc.Λ \ r)
 end
 
@@ -173,7 +183,7 @@ function fit!(m::VCModel, sevc::Bool=false)
     end
     opt = Opt(optsum)
     function obj(θ::Vector, dummygrad)
-        val = objective(updateΛ!(setθ!(m, θ)))
+        val = objective(updateμ!(updateΛ!(setθ!(m, θ))))
         println("objective: $val, θ: $θ")
         val
     end
