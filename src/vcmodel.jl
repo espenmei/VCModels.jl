@@ -13,7 +13,8 @@ struct VCData{T<:AbstractFloat}
     dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
 end
 
-function VCData(y::Vector{T}, X::Matrix{T}, R::Vector{AbstractMatrix{T}}) where T<:AbstractFloat
+function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix{T}}) where T <:AbstractFloat
+    X = reshape(X, :, size(X, 2)) # Make sure X is a matrix
     VCData(
     y,
     X,
@@ -37,14 +38,15 @@ end
 `VCModel` holds data, parameters and optimization info of a variance component model.
 # Fields
 - `data`: VCData
-- `θ`: array of scalar variance component parameters
-- `θ_lb`: array of lower bounds on θ
+- `θ`: vector of scalar variance component parameters
+- `θ_lb`: vector of lower bounds on θ
 - `vc`: VCMat
-- `H`: hessian
+- `μ`: vector of model implied means
+- `H`: Matrix with missing or hessian if requested
 - `tf`: transformation function applied to θ during optimization
 - `optsum`: OptSummary
 """
-struct VCModel{T<:AbstractFloat}
+struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData
     θ::Vector{T}
     θ_lb::Vector{T}
@@ -226,10 +228,17 @@ function Base.show(io::IO, m::VCModel)
         return nothing
     end
     oo = objective(m)
-    numsoo = Ryu.writefixed.([-0.5 * oo, oo], 4) # decimals to print
-    println(io, " Variance component model fit by maximum likelihood")
-    println(io, "logLik", "\t\t", "-2 logLik")
-    println(io, numsoo[1], "\t", numsoo[2])
+    nums = Ryu.writefixed.([-0.5 * oo, oo, aic(m), aicc(m), bic(m)], 4)
+    cols = ["logLik", "-2 logLik", "AIC", "AICc", "BIC"]
+    fieldwd = max(maximum(textwidth.(nums)) + 1, 11)
+    for i in cols
+        print(io, rpad(i, fieldwd))
+    end
+    println(io)
+    for i in nums
+        print(io, rpad(i, fieldwd))
+    end
+    println(io)
     println(io)
     println(io, " Variance component parameters:")
 
@@ -265,4 +274,16 @@ function StatsBase.coeftable(m::VCModel)
     4, # pvalcol
     3,  # zcol
     )
+end
+
+function StatsBase.dof(m::VCModel)
+    m.data.dims.p + m.data.dims.nvcomp
+end
+
+function StatsBase.nobs(m::VCModel)
+    m.data.dims.n
+end
+
+function StatsBase.loglikelihood(m::VCModel)
+    -0.5 * objective(m)
 end

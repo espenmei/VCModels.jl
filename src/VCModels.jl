@@ -18,13 +18,16 @@ export
     # Computations
     setθ!,
     updateΛ!,
+    updateμ!,
     fixef,
+    fixef!,
     objective,
     fit,
     fit!,
     hessian!,
     # Utilities
     ranef,
+    ranef!,
     vcov,
     vcovvc,
     vcovvctr,
