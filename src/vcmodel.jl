@@ -131,25 +131,29 @@ function stderrorvc(m::VCModel)
     sqrt.(diag(vcovvc(m)))
 end
 
-# Denne er billig
-function fixef(m::VCModel)
+function fixef!(v::Vector{T}, m::VCModel{T}) where T
     X = m.data.X
     Λ = m.vc.Λ
-    X' * (Λ \ X) \ (X' * (Λ \ m.data.y)) # GLS inv(X'inv(Σ)X)X'inv(Σ)y
-   #  XtΣinvX = BLAS.gemm('T', 'N', X, Λ \ X)
-   #  XtΣinvy = BLAS.gemv('T', X, Λ \ y)
-   #  inv(XtΣinvX) * XtΣinvy
+    copyto!(v, X' * (Λ \ X) \ (X' * (Λ \ m.data.y))) # Denne er billig
+    v
+end
+
+function fixef(m::VCModel{T}) where T
+    fixef!(Vector{T}(undef, m.data.dims.p), m)
+end
+
+function ranef!(w::Matrix{T}, m::VCModel{T}) where T
+    δ = m.tf(m.θ)
+    r = m.vc.Λ \ (m.data.y - m.μ) # Σ^-1(y - Xβ) 
+    for i in 1:m.data.dims.nvcomp
+        w[:, i] = δ[i] * m.data.R[i] * r
+    end
+    w
 end
 
 function ranef(m::VCModel{T}) where T
-    nvcomp = m.data.dims.nvcomp
-    U = Matrix{T}(undef, m.data.dims.n, nvcomp) # Fix type
-    R = m.data.R
-    r = m.vc.Λ \ (m.data.y - m.data.X * VCModels.fixef(m)) # Σ^-1(y - Xβ) 
-    for i in 1:length(R)
-        U[:, i] = m.θ[i] * R[i] * r
-    end
-    U
+    w = Matrix{T}(undef, m.data.dims.n, m.data.dims.nvcomp)
+    ranef!(w, m)
 end
 
 # Denne er nå billig!
