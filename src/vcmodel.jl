@@ -8,18 +8,12 @@
 """
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
-    X::Array{T, 2}
-    R::Vector{<:AbstractArray{T, 2}} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!
+    X::Matrix{T}
+    R::Vector{<:AbstractMatrix{T}} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!
     dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
 end
 
-function VCData(y::Vector{T}, X::Array{T, 2}, R::Vector{AbstractArray{T, 2}}) where T<:AbstractFloat 
-  #  Rs = Vector{AbstractArray{T, 2}}()
-   # for i in R # Tag all correlation matrices as Hermition. Note that the matrix may change if not.
-    #    push!(Rs, Hermitian(i))
-    #end
-    #n = size(X, 1)
-    #push!(Rs, Diagonal(ones(n)))
+function VCData(y::Vector{T}, X::Matrix{T}, R::Vector{AbstractMatrix{T}}) where T<:AbstractFloat
     VCData(
     y,
     X,
@@ -44,7 +38,7 @@ end
 # Fields
 - `data`: VCData
 - `θ`: array of scalar variance component parameters
-- `θ_lb`: array of lowerbounds on θ
+- `θ_lb`: array of lower bounds on θ
 - `vc`: VCMat
 - `H`: hessian
 - `tf`: transformation function applied to θ during optimization
@@ -77,7 +71,7 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     )
 end
 
-function VCModel(d::VCData, θ_lb::Vector{T}) where T<:Real # AbstractFloat
+function VCModel(d::VCData, θ_lb::Vector{T}) where T<: AbstractFloat
     VCModel(
     d,
     θ_lb,
@@ -98,8 +92,7 @@ function updateΛ!(m::VCModel)
         mul!(m.vc.Σ, δ[i], m.data.R[i], 1.0, 1.0)
     end
     # Update the cholesky factorization object
-    cholesky!(Symmetric(copyto!(m.vc.Λ.factors, m.vc.Σ), :U))
-    #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
+    cholesky!(Symmetric(copyto!(m.vc.Λ.factors, m.vc.Σ), :U)) #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
     m
 end
 
@@ -109,11 +102,11 @@ function vcov(m::VCModel)
 end
 
 function vcovvc(m::VCModel)
-    if any(ismissing.(m.H))
-        return m.H
-    else
-        return inv(0.5 * m.H)
+    H = m.H
+    if !any(ismissing.(m.H))
+        H = inv(0.5 * m.H)
     end
+    H    
 end
 
 function vcovvctr(m::VCModel)
