@@ -69,7 +69,7 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     θ_lb,
     VCMat(cholesky!(Matrix{T}(1.0I, n, n)), Matrix{T}(undef, n, n)),
     Vector{T}(undef, n),
-    Array{Union{Missing, T}}(missing, 2, 2),
+    Array{Union{Missing, T}}(missing, s, s),
     tf,
     OptSummary(θ_init, θ_lb)
     )
