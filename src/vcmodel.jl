@@ -92,12 +92,15 @@ function updateΛ!(m::VCModel)
     δ = m.tf(m.θ)
     #Σ = sum(broadcast(*, δ, m.data.R)) # Dette er dyrt
     fill!(m.vc.Σ, zero(eltype(m.θ))) # Reset all values in Σ to zero
-    for i in 1:m.data.dims.nvcomp
+    begin
+    for i in 1:m.data.dims.nvcomp # tar litt tid
         mul!(m.vc.Σ, δ[i], m.data.R[i], 1.0, 1.0)
+        #LinearAlgebra.axpy!(δ[i], m.data.R[i], m.vc.Σ)
+    end
     end
     # Update the cholesky factorization object
     copyto!(m.vc.Λ.factors, m.vc.Σ)
-    cholesky!(Symmetric(m.vc.Λ.factors, :U))
+    cholesky!(Symmetric(m.vc.Λ.factors, :U)) # Tar mest tid
     #cholesky!(Symmetric(copyto!(m.vc.Λ.factors, m.vc.Σ), :U)) #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
     m
 end
@@ -136,7 +139,9 @@ end
 function fixef!(v::Vector{T}, m::VCModel{T}) where T
     X = m.data.X
     Λ = m.vc.Λ
-    copyto!(v, X' * (Λ \ X) \ (X' * (Λ \ m.data.y))) # Denne er billig
+    #copyto!(v, X' * (Λ \ X) \ (X' * (Λ \ m.data.y))) # Denne er billig
+    ΣinvX = Λ \ X # Σ^-1X
+    copyto!(v, (X' * ΣinvX) \ (ΣinvX' * m.data.y))
     v
 end
 
@@ -160,10 +165,10 @@ end
 
 # Denne er nå billig!
 # http://hua-zhou.github.io/teaching/biostatm280-2019spring/slides/10-chol/chol.html#Multivariate-normal-density
-function wrss(m::VCModel) # (y - Xβ)'Σ^-1(y - Xβ) - r'r / n = residual var
+# Weighted residual sums of squares
+function wrss(m::VCModel) # (y - Xβ)'Σ^-1(y - Xβ) = r'r
     #r = m.vc.Λ.L \ (m.data.y - m.data.X * fixef(m))
     #r ⋅ r #
-    #r = m.data.y - m.data.X * fixef(m)
     r = m.data.y - m.μ
     dot(r, m.vc.Λ \ r)
 end

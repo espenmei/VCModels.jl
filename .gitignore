@@ -1,3 +1,4 @@
 .vscode/
+text/
 init.jl
 init_trio.jl
