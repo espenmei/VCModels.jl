@@ -282,7 +282,7 @@ function StatsBase.coeftable(m::VCModel)
     tab = hcat(co, se, z, pval)
     CoefTable(
     tab, # value cols
-    ["Coef.", "Std. Error", "z", "Pr(>|z|)"], # Colnms
+    ["Coef.", "Std. Error", "z", "Pr(>|z|)"], # Colnames
     names, # rownames
     4, # pvalcol
     3,  # zcol
