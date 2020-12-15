@@ -9,7 +9,7 @@ using StatsModels
 using DataFrames
 using FiniteDiff
 
-import NLopt: Opt
+#import NLopt: Opt
 
 export
     # Structs/constructors 
@@ -34,7 +34,7 @@ export
     stderror,
     stderrorvc
 
-include("optsummary.jl")
+#include("optsummary.jl")
 include("vcmodel.jl")
 
 end # module

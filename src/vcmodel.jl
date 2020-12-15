@@ -44,7 +44,7 @@ end
 - `μ`: vector of model implied means
 - `H`: Matrix with missing or hessian if requested
 - `tf`: transformation function applied to θ during optimization
-- `optsum`: OptSummary
+- `opt`: NLopt.Opt
 """
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData
@@ -54,7 +54,7 @@ struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     μ::Vector{T}
     H::Array{Union{Missing, T}, 2}
     tf::Function
-    optsum::OptSummary
+    opt::Opt
 end
 
 function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFloat
@@ -63,6 +63,15 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     s = d.dims.nvcomp
     θ_init = fill(msse / s, s)
     n = d.dims.n
+    # Create new opt object and set parameters, same defaults as MixedModels.jl
+    opt = Opt(:LN_BOBYQA, length(θ_init))
+    lower_bounds!(opt, θ_lb) # lower bounds
+    ftol_rel!(opt, T(1.0e-12)) # relative criterion on objective
+    ftol_abs!(opt, T(1.0e-8)) # absolute criterion on objective   
+    xtol_rel!(opt, zero(T)) # relative criterion on parameter values
+    xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
+    maxeval!(opt, -1) # maximum number of function evaluations (no limit)
+   
     VCModel(
     d,
     θ_init,
@@ -71,7 +80,7 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     Vector{T}(undef, n),
     Array{Union{Missing, T}}(missing, s, s),
     tf,
-    OptSummary(θ_init, θ_lb)
+    opt
     )
 end
 
@@ -91,12 +100,10 @@ end
 function updateΛ!(m::VCModel)
     δ = m.tf(m.θ)
     #Σ = sum(broadcast(*, δ, m.data.R)) # Dette er dyrt
-    fill!(m.vc.Σ, zero(eltype(m.θ))) # Reset all values in Σ to zero
-    begin
+    fill!(m.vc.Σ, zero(eltype(m.θ))) # Reset all values in Σ to zeros
     for i in 1:m.data.dims.nvcomp # tar litt tid
         mul!(m.vc.Σ, δ[i], m.data.R[i], 1.0, 1.0)
         #LinearAlgebra.axpy!(δ[i], m.data.R[i], m.vc.Σ)
-    end
     end
     # Update the cholesky factorization object
     copyto!(m.vc.Λ.factors, m.vc.Σ)
@@ -166,13 +173,12 @@ end
 # Denne er nå billig!
 # http://hua-zhou.github.io/teaching/biostatm280-2019spring/slides/10-chol/chol.html#Multivariate-normal-density
 # Weighted residual sums of squares
-function wrss(m::VCModel) # (y - Xβ)'Σ^-1(y - Xβ) = r'r
-    #r = m.vc.Λ.L \ (m.data.y - m.data.X * fixef(m))
-    #r ⋅ r #
+function wrss(m::VCModel) # (y - Xβ)'Σ^-1(y - Xβ)
     r = m.data.y - m.μ
     dot(r, m.vc.Λ \ r)
 end
 
+# Negative twice normal log-likelihood
 function objective(m::VCModel)    
     log(2.0π) * m.data.dims.n + logdet(m.vc.Λ) + wrss(m)
 end
@@ -188,26 +194,22 @@ function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bo
 end
 
 function fit!(m::VCModel, sevc::Bool=false)
-    optsum = m.optsum
-    if optsum.feval > 0
+    if m.opt.numevals > 0
         throw(ArgumentError("This model has already been fitted."))
     end
-    opt = Opt(optsum)
     function obj(θ::Vector, dummygrad)
         val = objective(updateμ!(updateΛ!(setθ!(m, θ))))
         println("objective: $val, θ: $θ")
         val
     end
-    NLopt.min_objective!(opt, obj)
-    minf, minx, ret = NLopt.optimize!(opt, copyto!(optsum.final, optsum.initial))
-    # Update optsum
-    optsum.feval = opt.numevals
-    optsum.fmin = minf
-    optsum.returnvalue = ret
+    min_objective!(m.opt, obj) # set obj as the function (to be minimized)
+    #minf, minx, ret = optimize!(opt, copyto!(optsum.final, optsum.initial))
+    minf, minx, ret = optimize!(m.opt, m.θ) # Optimize
+    
     if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
         @warn("NLopt optimization failure: $ret")
     end
-    # Hessian
+    
     if sevc
         @info("Computing hessian")
         hessian!(m)
@@ -216,19 +218,24 @@ function fit!(m::VCModel, sevc::Bool=false)
 end
 
 function hessian!(m::VCModel)
-    m_tmp = deepcopy(m)
+    if m.opt.numevals <= 0
+        @warn("This model has not been fitted.")
+        return nothing
+    end
     function obj(x::Vector)
-        val = objective(updateΛ!(setθ!(m_tmp, x)))
+        val = objective(updateμ!(updateΛ!(setθ!(m_tmp, x))))
         println("objective: $val, θ: $x")
         val
     end
-    # Need to use opsum.final here as m.θ is not mutable?
-    FiniteDiff.finite_difference_hessian!(m.H, obj, m_tmp.optsum.final)
-    m
+    m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
+    #cache = FiniteDiff.HessianCache(m.θ)
+    #FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ, cache)
+    FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ)
+    #FiniteDiff.finite_difference_hessian(obj, copy(m_tmp.θ))
 end
 
 function Base.show(io::IO, m::VCModel)
-    if m.optsum.feval < 0
+    if m.opt.numevals <= 0
         @warn("This model has not been fitted.")
         return nothing
     end
@@ -265,6 +272,7 @@ function Base.show(io::IO, m::VCModel)
     show(io, coeftable(m))
 end
 
+# StatsBase
 function StatsBase.coeftable(m::VCModel)
     co = fixef(m)
     se = stderror(m)
