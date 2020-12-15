@@ -70,7 +70,6 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     ftol_abs!(opt, T(1.0e-8)) # absolute criterion on objective   
     xtol_rel!(opt, zero(T)) # relative criterion on parameter values
     xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
-    maxeval!(opt, -1) # maximum number of function evaluations (no limit)
    
     VCModel(
     d,
