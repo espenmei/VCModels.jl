@@ -9,11 +9,13 @@
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
     X::Matrix{T}
-    R::Vector{<:AbstractMatrix{T}} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!
+    R::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!
     dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
 end
 
-function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix{T}}) where T <:AbstractFloat
+#function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix{T}}) where T <:AbstractFloat
+
+function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix}) where T <:AbstractFloat
     X = reshape(X, :, size(X, 2)) # Make sure X is a matrix
     VCData(
     y,
