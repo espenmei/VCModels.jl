@@ -59,12 +59,7 @@ struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     opt::Opt
 end
 
-function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFloat
-    # Initial values
-    msse = sum((d.y - d.X * (d.X \ d.y)).^2) / d.dims.n
-    s = d.dims.nvcomp
-    θ_init = fill(msse / s, s)
-    n = d.dims.n
+function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function) where T<:AbstractFloat
     # Create new opt object and set parameters, same defaults as MixedModels.jl
     opt = Opt(:LN_BOBYQA, length(θ_init))
     lower_bounds!(opt, θ_lb) # lower bounds
@@ -73,6 +68,7 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     xtol_rel!(opt, zero(T)) # relative criterion on parameter values
     xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
    
+    n = d.dims.n
     VCModel(
     d,
     θ_init,
@@ -85,9 +81,14 @@ function VCModel(d::VCData, θ_lb::Vector{T}, tf::Function) where T<:AbstractFlo
     )
 end
 
-function VCModel(d::VCData, θ_lb::Vector{T}) where T<: AbstractFloat
+function VCModel(d::VCData, θ_lb::Vector{T}) where T<:AbstractFloat
+    # Initial values
+    msse = sum((d.y - d.X * (d.X \ d.y)).^2) / d.dims.n
+    s = d.dims.nvcomp
+    θ_init = fill(msse / s, s)
     VCModel(
     d,
+    θ_init,
     θ_lb,
     (θ::Vector{T}) -> θ # Just set to identity
     )
