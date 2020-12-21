@@ -69,6 +69,7 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function)
     xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
    
     n = d.dims.n
+    s = d.dims.nvcomp
     VCModel(
     d,
     θ_init,
