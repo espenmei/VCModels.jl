@@ -9,12 +9,12 @@
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
     X::Matrix{T}
+    #R::Vector{<:AbstractMatrix{T}}
     R::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!
     dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
 end
 
 #function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix{T}}) where T <:AbstractFloat
-
 function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix}) where T <:AbstractFloat
     X = reshape(X, :, size(X, 2)) # Make sure X is a matrix
     VCData(
@@ -116,7 +116,11 @@ function updateΛ!(m::VCModel)
 end
 
 function updateμ!(m::VCModel)
-    mul!(m.μ, m.data.X, fixef(m))
+    #mul!(m.μ, m.data.X, fixef(m))
+    X = m.data.X
+    Λ = m.vc.Λ
+    ΣinvX = Λ \ X # Σ^-1X
+    mul!(m.μ, X, (X' * ΣinvX) \ (ΣinvX' * m.data.y))
     m
 end
 
@@ -183,7 +187,7 @@ end
 
 # Negative twice normal log-likelihood
 function objective(m::VCModel)    
-    log(2.0π) * m.data.dims.n + logdet(m.vc.Λ) + wrss(m)
+    log(2π) * m.data.dims.n + logdet(m.vc.Λ) + wrss(m)
 end
 
 function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bool=false)
