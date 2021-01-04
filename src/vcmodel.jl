@@ -26,25 +26,14 @@ function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix}) where
 end
 
 """
-`VCMat` holds the model implied covariance matrix.
-# Fields
-- `Λ`: cholesky object of the model covariance matrix
-- `Σ`: model covariance matrix
-"""
-struct VCMat{T<:AbstractFloat}
-    Λ::Cholesky{T}
-    Σ::Matrix{T}
-end
-
-"""
 `VCModel` holds data, parameters and optimization info of a variance component model.
 # Fields
 - `data`: VCData
 - `θ`: vector of scalar variance component parameters
 - `θ_lb`: vector of lower bounds on θ
-- `vc`: VCMat
+- `Λ`: cholesky object of the model implied covariance matrix
 - `μ`: vector of model implied means
-- `H`: Matrix with missing or hessian if requested
+- `H`: Matrix with missing or hessian if θ if requested
 - `tf`: transformation function applied to θ during optimization
 - `opt`: NLopt.Opt
 """
@@ -52,7 +41,7 @@ struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData
     θ::Vector{T}
     θ_lb::Vector{T}
-    vc::VCMat{T}
+    Λ::Cholesky{T}  
     μ::Vector{T}
     H::Array{Union{Missing, T}, 2}
     tf::Function
@@ -67,14 +56,15 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function)
     ftol_abs!(opt, T(1.0e-8)) # absolute criterion on objective   
     xtol_rel!(opt, zero(T)) # relative criterion on parameter values
     xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
-   
+    maxeval!(opt, -1)
+    
     n = d.dims.n
     s = d.dims.nvcomp
     VCModel(
     d,
     θ_init,
     θ_lb,
-    VCMat(cholesky!(Matrix{T}(1.0I, n, n)), Matrix{T}(undef, n, n)),
+    cholesky!(Matrix{T}(1.0I, n, n)),
     Vector{T}(undef, n),
     Array{Union{Missing, T}}(missing, s, s),
     tf,
@@ -100,17 +90,14 @@ function setθ!(m::VCModel, θ::Vector)
     m
 end
 
-function updateΛ!(m::VCModel)
+function updateΛ!(m::VCModel)    
+    fill!(m.Λ.factors, zero(eltype(m.θ)))
     δ = m.tf(m.θ)
-    #Σ = sum(broadcast(*, δ, m.data.R)) # Dette er dyrt
-    fill!(m.vc.Σ, zero(eltype(m.θ))) # Reset all values in Σ to zeros
     for i in 1:m.data.dims.nvcomp # tar litt tid
-        mul!(m.vc.Σ, δ[i], m.data.R[i], 1.0, 1.0)
-        #LinearAlgebra.axpy!(δ[i], m.data.R[i], m.vc.Σ)
+        mul!(m.Λ.factors, δ[i], m.data.R[i], 1.0, 1.0)
     end
     # Update the cholesky factorization object
-    copyto!(m.vc.Λ.factors, m.vc.Σ)
-    cholesky!(Symmetric(m.vc.Λ.factors, :U)) # Tar mest tid
+    cholesky!(Symmetric(m.Λ.factors, :U)) # Tar mest tid
     #cholesky!(Symmetric(copyto!(m.vc.Λ.factors, m.vc.Σ), :U)) #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
     m
 end
@@ -118,21 +105,20 @@ end
 function updateμ!(m::VCModel)
     #mul!(m.μ, m.data.X, fixef(m))
     X = m.data.X
-    Λ = m.vc.Λ
-    ΣinvX = Λ \ X # Σ^-1X
+    ΣinvX = m.Λ \ X # Σ^-1X
     mul!(m.μ, X, (X' * ΣinvX) \ (ΣinvX' * m.data.y))
     m
 end
 
 function vcov(m::VCModel)
     X = m.data.X
-    inv(X' * (m.vc.Λ \ X))
+    inv(X' * (m.Λ \ X))
 end
 
 function vcovvc(m::VCModel)
     H = m.H
-    if !any(ismissing.(m.H))
-        H = inv(0.5 * m.H)
+    if !any(ismissing.(H))
+        H = inv(0.5 * H)
     end
     H    
 end
@@ -151,11 +137,11 @@ function stderrorvc(m::VCModel)
 end
 
 function fixef!(v::Vector{T}, m::VCModel{T}) where T
-    X = m.data.X
-    Λ = m.vc.Λ
+    #X = m.data.X
     #copyto!(v, X' * (Λ \ X) \ (X' * (Λ \ m.data.y))) # Denne er billig
-    ΣinvX = Λ \ X # Σ^-1X
-    copyto!(v, (X' * ΣinvX) \ (ΣinvX' * m.data.y))
+    #ΣinvX = m.Λ \ X # Σ^-1X
+    #copyto!(v, (X' * ΣinvX) \ (ΣinvX' * m.data.y))
+    copyto!(v, m.data.X \ m.μ)
     v
 end
 
@@ -165,7 +151,7 @@ end
 
 function ranef!(w::Matrix{T}, m::VCModel{T}) where T
     δ = m.tf(m.θ)
-    r = m.vc.Λ \ (m.data.y - m.μ) # Σ^-1(y - Xβ) 
+    r = m.Λ \ (m.data.y - m.μ) # Σ^-1(y - Xβ) 
     for i in 1:m.data.dims.nvcomp
         w[:, i] = δ[i] * m.data.R[i] * r
     end
@@ -182,12 +168,12 @@ end
 # Weighted residual sums of squares
 function wrss(m::VCModel) # (y - Xβ)'Σ^-1(y - Xβ)
     r = m.data.y - m.μ
-    dot(r, m.vc.Λ \ r)
+    dot(r, m.Λ \ r)
 end
 
 # Negative twice normal log-likelihood
 function objective(m::VCModel)    
-    log(2π) * m.data.dims.n + logdet(m.vc.Λ) + wrss(m)
+    log(2π) * m.data.dims.n + logdet(m.Λ) + wrss(m)
 end
 
 function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bool=false)
