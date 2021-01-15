@@ -56,7 +56,7 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function)
     ftol_abs!(opt, T(1.0e-8)) # absolute criterion on objective   
     xtol_rel!(opt, zero(T)) # relative criterion on parameter values
     xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
-    maxeval!(opt, -1)
+    maxeval!(opt, -1) # maxumum number of function evaluations
     
     n = d.dims.n
     s = d.dims.nvcomp
@@ -74,12 +74,11 @@ end
 
 function VCModel(d::VCData, θ_lb::Vector{T}) where T<:AbstractFloat
     # Initial values
-    msse = sum((d.y - d.X * (d.X \ d.y)).^2) / d.dims.n
+    msse = sum(abs2, d.y - d.X * (d.X \ d.y)) / d.dims.n
     s = d.dims.nvcomp
-    θ_init = fill(msse / s, s)
     VCModel(
     d,
-    θ_init,
+    fill(msse / s, s),
     θ_lb,
     (θ::Vector{T}) -> θ # Just set to identity
     )
@@ -94,7 +93,8 @@ function updateΛ!(m::VCModel)
     fill!(m.Λ.factors, zero(eltype(m.θ)))
     δ = m.tf(m.θ)
     for i in 1:m.data.dims.nvcomp # tar litt tid
-        mul!(m.Λ.factors, δ[i], m.data.R[i], 1.0, 1.0)
+        mul!(m.Λ.factors, δ[i], m.data.R[i], 1, 1)
+        #BLAS.symm!('L', 'U', 1.0, m.data.R[i], δ[i], 1.0, m.Λ.factors)
     end
     # Update the cholesky factorization object
     cholesky!(Symmetric(m.Λ.factors, :U)) # Tar mest tid
@@ -103,7 +103,6 @@ function updateΛ!(m::VCModel)
 end
 
 function updateμ!(m::VCModel)
-    #mul!(m.μ, m.data.X, fixef(m))
     X = m.data.X
     ΣinvX = m.Λ \ X # Σ^-1X
     mul!(m.μ, X, (X' * ΣinvX) \ (ΣinvX' * m.data.y))
@@ -137,10 +136,6 @@ function stderrorvc(m::VCModel)
 end
 
 function fixef!(v::Vector{T}, m::VCModel{T}) where T
-    #X = m.data.X
-    #copyto!(v, X' * (Λ \ X) \ (X' * (Λ \ m.data.y))) # Denne er billig
-    #ΣinvX = m.Λ \ X # Σ^-1X
-    #copyto!(v, (X' * ΣinvX) \ (ΣinvX' * m.data.y))
     copyto!(v, m.data.X \ m.μ)
     v
 end
