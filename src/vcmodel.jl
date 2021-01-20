@@ -185,7 +185,7 @@ function fit!(m::VCModel, sevc::Bool=false)
     if m.opt.numevals > 0
         throw(ArgumentError("This model has already been fitted."))
     end
-    function obj(θ::Vector, dummygrad)
+    function obj(θ::Vector, g)
         val = objective(updateμ!(updateΛ!(setθ!(m, θ))))
         println("objective: $val, θ: $θ")
         val
@@ -217,10 +217,9 @@ function hessian!(m::VCModel)
     end
     m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
     #cache = FiniteDiff.HessianCache(m.θ)
-    #FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ, cache)
     FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ)
-    #FiniteDiff.finite_difference_hessian(obj, copy(m_tmp.θ))
 end
+
 
 function Base.show(io::IO, m::VCModel)
     if m.opt.numevals <= 0
