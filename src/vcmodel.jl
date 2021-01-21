@@ -166,9 +166,14 @@ function wrss(m::VCModel) # (y - Xβ)'Σ^-1(y - Xβ)
     dot(r, m.Λ \ r)
 end
 
+function rml(m::VCModel) # X' * Σ^-1 * X
+    X = m.data.X
+    logdet(X' * (m.Λ \ X))
+end
+
 # Negative twice normal log-likelihood
 function objective(m::VCModel)    
-    log(2π) * m.data.dims.n + logdet(m.Λ) + wrss(m)
+    log(2π) * m.data.dims.n + logdet(m.Λ) + wrss(m) #+ rml(m)
 end
 
 function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bool=false)
