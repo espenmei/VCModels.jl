@@ -46,9 +46,10 @@ struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     H::Array{Union{Missing, T}, 2}
     tf::Function
     opt::Opt
+    reml::Bool
 end
 
-function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function) where T<:AbstractFloat
+function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function, reml::Bool = false) where T<:AbstractFloat
     # Create new opt object and set parameters, same defaults as MixedModels.jl
     opt = Opt(:LN_BOBYQA, length(θ_init))
     lower_bounds!(opt, θ_lb) # lower bounds
@@ -68,11 +69,12 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function)
     Vector{T}(undef, n),
     Array{Union{Missing, T}}(missing, s, s),
     tf,
-    opt
+    opt,
+    reml
     )
 end
 
-function VCModel(d::VCData, θ_lb::Vector{T}) where T<:AbstractFloat
+function VCModel(d::VCData, θ_lb::Vector{T},  reml::Bool = false) where T<:AbstractFloat
     # Initial values
     msse = sum(abs2, d.y - d.X * (d.X \ d.y)) / d.dims.n
     s = d.dims.nvcomp
@@ -80,7 +82,8 @@ function VCModel(d::VCData, θ_lb::Vector{T}) where T<:AbstractFloat
     d,
     fill(msse / s, s),
     θ_lb,
-    (θ::Vector{T}) -> θ # Just set to identity
+    (θ::Vector{T}) -> θ, # Just set to identity
+    reml
     )
 end
 
@@ -102,6 +105,8 @@ function updateΛ!(m::VCModel)
     m
 end
 
+# Generalized lest squares for β
+# Pawitan p. 440 (X'Σ^-1X)β = X'Σ^-1y
 function updateμ!(m::VCModel)
     X = m.data.X
     ΣinvX = m.Λ \ X # Σ^-1X
@@ -144,6 +149,7 @@ function fixef(m::VCModel{T}) where T
     fixef!(Vector{T}(undef, m.data.dims.p), m)
 end
 
+# Posterior means for u
 function ranef!(w::Matrix{T}, m::VCModel{T}) where T
     δ = m.tf(m.θ)
     r = m.Λ \ (m.data.y - m.μ) # Σ^-1(y - Xβ) 
@@ -158,31 +164,46 @@ function ranef(m::VCModel{T}) where T
     ranef!(w, m)
 end
 
+function dfresidual(m::VCModel)::Int
+    n = m.data.dims.n
+    m.reml ? n - m.data.dims.p : n
+end
+
 # Denne er nå billig!
 # http://hua-zhou.github.io/teaching/biostatm280-2019spring/slides/10-chol/chol.html#Multivariate-normal-density
 # Weighted residual sums of squares
-function wrss(m::VCModel) # (y - Xβ)'Σ^-1(y - Xβ)
+# (y - Xβ)'Σ^-1(y - Xβ)
+# Same as y'Py in Lynch & Walsh
+# Same as trace(Σ^-1 * (y - Xβ)(y - Xβ)')
+function wrss(m::VCModel)
     r = m.data.y - m.μ
     dot(r, m.Λ \ r)
 end
 
-function rml(m::VCModel) # X' * Σ^-1 * X
+# Pawitan p. 441
+function rml(m::VCModel) # logdet(X' * Σ^-1 * X)
     X = m.data.X
     logdet(X' * (m.Λ \ X))
 end
 
+# Are the constant right for reml?
 # Negative twice normal log-likelihood
-function objective(m::VCModel)    
-    log(2π) * m.data.dims.n + logdet(m.Λ) + wrss(m) #+ rml(m)
+function objective(m::VCModel)
+    constant = log(2π) * dfresidual(m)
+    val = constant + logdet(m.Λ) + wrss(m)
+    m.reml ? val + rml(m) : val
+    #log(2π) * m.data.dims.n + logdet(m.Λ) + wrss(m) #+ rml(m)
+    #log(2π) * (m.data.dims.n - m.data.dims.p) + logdet(m.Λ) + wrss(m) + rml(m)
+    #logdet(m.Λ) + wrss(m) + rml(m)
 end
 
-function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bool=false)
+function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bool = false, reml::Bool = false)
     sch = schema(f, df)
     form = apply_schema(f, sch)
     y, X = modelcols(form, df)
     d = VCData(y, X, R)
     θ_lb = fill(0.0, length(R))
-    m = VCModel(d, θ_lb)
+    m = VCModel(d, θ_lb, reml)
     fit!(m, sevc)
 end
 
