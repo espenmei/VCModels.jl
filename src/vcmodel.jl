@@ -1,17 +1,17 @@
 """
 `VCData` stores the fixed input data of a variance component model.
 # Fields
-- `y`: one-dimensional 'n × 1' vector of responses
-- `X`: two-dimensional 'n × p' matrix of covariates
+- `y`: 'n × 1' vector of responses
+- `X`: 'n × p' matrix of covariates
 - `R`: vector of 'n × n' correlation matrices
-- `dims`: tuple with size of y, X, and R
+- `dims`: tuple with length of y, columns of X, and length of R
 """
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
     X::Matrix{T}
     #R::Vector{<:AbstractMatrix{T}}
-    R::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!
-    dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
+    R::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!?
+    dims::NamedTuple{(:n, :p, :m), NTuple{3, Int}}
 end
 
 #function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix{T}}) where T <:AbstractFloat
@@ -189,8 +189,7 @@ end
 # Are the constant right for reml?
 # Negative twice normal log-likelihood
 function objective(m::VCModel)
-    constant = log(2π) * dfresidual(m)
-    val = constant + logdet(m.Λ) + wrss(m)
+    val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
     m.reml ? val + rml(m) : val
     #log(2π) * m.data.dims.n + logdet(m.Λ) + wrss(m) #+ rml(m)
     #log(2π) * (m.data.dims.n - m.data.dims.p) + logdet(m.Λ) + wrss(m) + rml(m)
