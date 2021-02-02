@@ -1,5 +1,5 @@
 """
-`VCData` stores the fixed input data of a variance component model.
+`VCData` stores fixed input data of a variance component model.
 # Fields
 - `y`: 'n × 1' vector of responses
 - `X`: 'n × p' matrix of covariates
@@ -11,7 +11,7 @@ struct VCData{T<:AbstractFloat}
     X::Matrix{T}
     #R::Vector{<:AbstractMatrix{T}}
     R::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!?
-    dims::NamedTuple{(:n, :p, :m), NTuple{3, Int}}
+    dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
 end
 
 #function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix{T}}) where T <:AbstractFloat
