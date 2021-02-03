@@ -301,14 +301,10 @@ function StatsBase.coeftable(m::VCModel)
     )
 end
 
-function StatsBase.dof(m::VCModel)
-    m.data.dims.p + m.data.dims.nvcomp
-end
+StatsBase.dof(m::VCModel) m.data.dims.p + m.data.dims.nvcomp
 
-function StatsBase.nobs(m::VCModel)
-    m.data.dims.n
-end
+StatsBase.nobs(m::VCModel) m.data.dims.n
 
-function StatsBase.loglikelihood(m::VCModel)
-    -0.5 * objective(m)
-end
+StatsBase.loglikelihood(m::VCModel) = -0.5 * objective(m)
+
+StatsBase.deviance(m::VCModel) = objective(m)
