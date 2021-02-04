@@ -32,7 +32,13 @@ export
     vcovvc,
     vcovvctr,
     stderror,
-    stderrorvc
+    stderrorvc,
+    # Implements
+    dof,
+    dof_residual,
+    nobs,
+    loglikelihood,
+    deviance
 
 #include("optsummary.jl")
 include("vcmodel.jl")

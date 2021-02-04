@@ -98,6 +98,7 @@ function updateΛ!(m::VCModel)
     for i in 1:m.data.dims.nvcomp # tar litt tid
         mul!(m.Λ.factors, δ[i], m.data.R[i], 1, 1)
         #BLAS.symm!('L', 'U', 1.0, m.data.R[i], δ[i], 1.0, m.Λ.factors)
+        #axpy!(δ[i], m.data.R[i], m.Λ.factors)
     end
     # Update the cholesky factorization object
     cholesky!(Symmetric(m.Λ.factors, :U)) # Tar mest tid
@@ -285,6 +286,8 @@ function Base.show(io::IO, m::VCModel)
 end
 
 # StatsBase
+StatsBase.coef =(m::VCModel) = fixef(m)
+
 function StatsBase.coeftable(m::VCModel)
     co = fixef(m)
     se = stderror(m)
@@ -301,10 +304,26 @@ function StatsBase.coeftable(m::VCModel)
     )
 end
 
-StatsBase.dof(m::VCModel) m.data.dims.p + m.data.dims.nvcomp
+StatsBase.deviance(m::VCModel) = objective(m)
 
-StatsBase.nobs(m::VCModel) m.data.dims.n
+StatsBase.dof(m::VCModel) = m.data.dims.p + m.data.dims.nvcomp
 
+function StatsBase.dof_residual(m::VCModel)::Int
+    m.data.dims.n - m.data.dims.p - m.data.dims.nvcomp
+end
+
+# Error for reml?
 StatsBase.loglikelihood(m::VCModel) = -0.5 * objective(m)
 
-StatsBase.deviance(m::VCModel) = objective(m)
+StatsBase.modelmatrix(m::VCModel) = m.data.X
+
+StatsBase.nobs(m::VCModel) = m.data.dims.n
+
+StatsBase.response(m::VCModel) = m.data.y
+
+# StatsModels
+function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
+    fterms = issubset(m1.data.X, m2.data.X)
+    rterms = issubset(m1.data.R, m2.data.R)
+    fterms && rterms
+end
