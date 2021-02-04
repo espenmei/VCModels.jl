@@ -34,13 +34,15 @@ export
     stderror,
     stderrorvc,
     # Implements
+    coef,
+    deviance,
     dof,
     dof_residual,
-    nobs,
     loglikelihood,
-    deviance
+    modelmatrix,
+    nobs,
+    response,
+    isnested
 
 #include("optsummary.jl")
 include("vcmodel.jl")
-
-end # module
