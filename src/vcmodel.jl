@@ -97,12 +97,9 @@ function updateΛ!(m::VCModel)
     δ = m.tf(m.θ)
     for i in 1:m.data.dims.nvcomp # tar litt tid
         mul!(m.Λ.factors, δ[i], m.data.R[i], 1, 1)
-        #BLAS.symm!('L', 'U', 1.0, m.data.R[i], δ[i], 1.0, m.Λ.factors)
-        #axpy!(δ[i], m.data.R[i], m.Λ.factors)
     end
     # Update the cholesky factorization object
     cholesky!(Symmetric(m.Λ.factors, :U)) # Tar mest tid
-    #cholesky!(Symmetric(copyto!(m.vc.Λ.factors, m.vc.Σ), :U)) #m.vc.Λ = cholesky!(Σ) # Dette tar litt tid, men ikke mye minne
     m
 end
 
@@ -231,6 +228,22 @@ function fit!(m::VCModel, sevc::Bool=false)
     m
 end
 
+# Lynch & Walsh p. 789 
+function fisherinfo!(m::VCModel)
+    s = m.data.dims.nvcomp
+    S = Matrix{Float64}(undef, s, s)
+    for i ∈ 1:s, j ∈ 1:i
+        r1 = m.Λ \ m.data.R[i]
+        if j == i
+            S[i,j] = dot(r1, r1)
+        else
+            r2 = m.Λ \ m.data.R[j]
+            S[i,j] = S[j,i] = dot(r1, r2)           
+        end
+    end
+    copyto!(m.H, S)
+end
+
 function hessian!(m::VCModel)
     if m.opt.numevals <= 0
         @warn("This model has not been fitted.")
@@ -286,7 +299,7 @@ function Base.show(io::IO, m::VCModel)
 end
 
 # StatsBase
-StatsBase.coef =(m::VCModel) = fixef(m)
+StatsBase.coef(m::VCModel) = fixef(m)
 
 function StatsBase.coeftable(m::VCModel)
     co = fixef(m)

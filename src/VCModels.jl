@@ -46,3 +46,5 @@ export
 
 #include("optsummary.jl")
 include("vcmodel.jl")
+
+end # module
