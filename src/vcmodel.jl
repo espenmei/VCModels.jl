@@ -204,7 +204,7 @@ function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bo
     fit!(m, sevc)
 end
 
-function fit!(m::VCModel, sevc::Bool=false)
+function fit!(m::VCModel)
     if m.opt.numevals > 0
         throw(ArgumentError("This model has already been fitted."))
     end
@@ -219,12 +219,7 @@ function fit!(m::VCModel, sevc::Bool=false)
     
     if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
         @warn("NLopt optimization failure: $ret")
-    end
-    
-    if sevc
-        @info("Computing hessian")
-        hessian!(m)
-    end
+    ends
     m
 end
 
