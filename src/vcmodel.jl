@@ -9,19 +9,18 @@
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
     X::Matrix{T}
-    #R::Vector{<:AbstractMatrix{T}}
-    R::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!?
+    #r::Vector{<:AbstractMatrix{T}}
+    r::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!?
     dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
 end
 
-#function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix{T}}) where T <:AbstractFloat
-function VCData(y::Vector{T}, X::VecOrMat{T}, R::Vector{<:AbstractMatrix}) where T <:AbstractFloat
+function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where T <:AbstractFloat
     X = reshape(X, :, size(X, 2)) # Make sure X is a matrix
     VCData(
     y,
     X,
-    R,
-    (n = size(X, 1), p = size(X, 2), nvcomp = length(R))
+    r,
+    (n = size(X, 1), p = size(X, 2), nvcomp = length(r))
     )
 end
 
@@ -33,23 +32,25 @@ end
 - `θ_lb`: vector of lower bounds on θ
 - `Λ`: cholesky object of the model implied covariance matrix
 - `μ`: vector of model implied means
-- `H`: Matrix with missing or hessian if θ if requested
+- `H`: matrix with missing or hessian of θ
 - `tf`: transformation function applied to θ during optimization
 - `opt`: NLopt.Opt
+- `reml`: boolean indicator for reml
 """
-struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
-    data::VCData
+struct VCModel{T<:AbstractFloat, F<:Function} <:StatsBase.StatisticalModel
+    data::VCData{T} # Type!?
     θ::Vector{T}
     θ_lb::Vector{T}
-    Λ::Cholesky{T}  
+    #Λ::Cholesky{T}
+    Λ::Cholesky{T, Matrix{T}}
     μ::Vector{T}
     H::Array{Union{Missing, T}, 2}
-    tf::Function
+    f::F
     opt::Opt
     reml::Bool
 end
 
-function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function, reml::Bool = false) where T<:AbstractFloat
+function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, f::Function, reml::Bool = false) where T<:AbstractFloat
     # Create new opt object and set parameters, same defaults as MixedModels.jl
     opt = Opt(:LN_BOBYQA, length(θ_init))
     lower_bounds!(opt, θ_lb) # lower bounds
@@ -57,7 +58,7 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function,
     ftol_abs!(opt, T(1.0e-8)) # absolute criterion on objective   
     xtol_rel!(opt, zero(T)) # relative criterion on parameter values
     xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
-    maxeval!(opt, -1) # maxumum number of function evaluations
+    maxeval!(opt, -1) # maximum number of function evaluations
     
     n = d.dims.n
     s = d.dims.nvcomp
@@ -65,10 +66,10 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, tf::Function,
     d,
     θ_init,
     θ_lb,
-    cholesky!(Matrix{T}(1.0I, n, n)),
+    cholesky!(zeros(T, n, n) + I),
     Vector{T}(undef, n),
     Array{Union{Missing, T}}(missing, s, s),
-    tf,
+    f,
     opt,
     reml
     )
@@ -94,16 +95,16 @@ end
 
 function updateΛ!(m::VCModel)    
     fill!(m.Λ.factors, zero(eltype(m.θ)))
-    δ = m.tf(m.θ)
+    δ = m.f(m.θ)
     for i in 1:m.data.dims.nvcomp # tar litt tid
-        mul!(m.Λ.factors, δ[i], m.data.R[i], 1, 1)
+        mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
     # Update the cholesky factorization object
     cholesky!(Symmetric(m.Λ.factors, :U)) # Tar mest tid
     m
 end
 
-# Generalized lest squares for β
+# Generalized least squares for β
 # Pawitan p. 440 (X'Σ^-1X)β = X'Σ^-1y
 function updateμ!(m::VCModel)
     X = m.data.X
@@ -126,7 +127,7 @@ function vcovvc(m::VCModel)
 end
 
 function vcovvctr(m::VCModel)
-    J = FiniteDiff.finite_difference_jacobian(m.tf, m.θ)
+    J = FiniteDiff.finite_difference_jacobian(m.f, m.θ)
     J, J * vcovvc(m) * J'
 end
 
@@ -152,7 +153,7 @@ function ranef!(w::Matrix{T}, m::VCModel{T}) where T
     δ = m.tf(m.θ)
     r = m.Λ \ (m.data.y - m.μ) # Σ^-1(y - Xβ) 
     for i in 1:m.data.dims.nvcomp
-        w[:, i] = δ[i] * m.data.R[i] * r
+        w[:, i] = δ[i] * m.data.r[i] * r
     end
     w
 end
@@ -189,17 +190,14 @@ end
 function objective(m::VCModel)
     val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
     m.reml ? val + rml(m) : val
-    #log(2π) * m.data.dims.n + logdet(m.Λ) + wrss(m) #+ rml(m)
-    #log(2π) * (m.data.dims.n - m.data.dims.p) + logdet(m.Λ) + wrss(m) + rml(m)
-    #logdet(m.Λ) + wrss(m) + rml(m)
 end
 
-function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, R::Vector, sevc::Bool = false, reml::Bool = false)
+function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, sevc::Bool = false, reml::Bool = false)
     sch = schema(f, df)
     form = apply_schema(f, sch)
     y, X = modelcols(form, df)
-    d = VCData(y, X, R)
-    θ_lb = fill(0.0, length(R))
+    d = VCData(y, X, r)
+    θ_lb = fill(0.0, length(r))
     m = VCModel(d, θ_lb, reml)
     fit!(m, sevc)
 end
@@ -213,13 +211,12 @@ function fit!(m::VCModel)
         println("objective: $val, θ: $θ")
         val
     end
-    min_objective!(m.opt, obj) # set obj as the function (to be minimized)
-    #minf, minx, ret = optimize!(opt, copyto!(optsum.final, optsum.initial))
+    min_objective!(m.opt, obj) # set obj as the objective function (to be minimized)
     minf, minx, ret = optimize!(m.opt, m.θ) # Optimize
     
     if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
         @warn("NLopt optimization failure: $ret")
-    ends
+    end
     m
 end
 
@@ -228,11 +225,11 @@ function fisherinfo!(m::VCModel)
     s = m.data.dims.nvcomp
     S = Matrix{Float64}(undef, s, s)
     for i ∈ 1:s, j ∈ 1:i
-        r1 = m.Λ \ m.data.R[i]
+        r1 = m.Λ \ m.data.r[i]
         if j == i
             S[i,j] = dot(r1, r1)
         else
-            r2 = m.Λ \ m.data.R[j]
+            r2 = m.Λ \ m.data.r[j]
             S[i,j] = S[j,i] = dot(r1, r2)           
         end
     end
@@ -254,7 +251,8 @@ function hessian!(m::VCModel)
     FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ)
 end
 
-
+# Implements
+# Base
 function Base.show(io::IO, m::VCModel)
     if m.opt.numevals <= 0
         @warn("This model has not been fitted.")
@@ -332,6 +330,6 @@ StatsBase.response(m::VCModel) = m.data.y
 # StatsModels
 function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
     fterms = issubset(m1.data.X, m2.data.X)
-    rterms = issubset(m1.data.R, m2.data.R)
+    rterms = issubset(m1.data.r, m2.data.r)
     fterms && rterms
 end

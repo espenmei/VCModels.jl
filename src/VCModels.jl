@@ -14,6 +14,7 @@ using FiniteDiff
 export
     # Structs/constructors 
     VCData,
+    VCData2,
     VCModel,
     # Computations
     setθ!,
