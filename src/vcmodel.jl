@@ -222,6 +222,10 @@ end
 
 # Lynch & Walsh p. 789 
 function fisherinfo!(m::VCModel)
+    if m.opt.numevals <= 0
+        @warn("This model has not been fitted.")
+        return nothing
+    end
     s = m.data.dims.nvcomp
     S = Matrix{Float64}(undef, s, s)
     for i ∈ 1:s, j ∈ 1:i
