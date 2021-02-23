@@ -88,6 +88,11 @@ function VCModel(d::VCData, θ_lb::Vector{T},  reml::Bool = false) where T<:Abst
     )
 end
 
+function update!(m::VCModel)
+    updateμ!(updateΛ!(m))
+    m
+end
+
 function setθ!(m::VCModel, θ::Vector)
     copyto!(m.θ, θ)
     m
@@ -207,13 +212,12 @@ function fit!(m::VCModel)
         throw(ArgumentError("This model has already been fitted."))
     end
     function obj(θ::Vector, g)
-        val = objective(updateμ!(updateΛ!(setθ!(m, θ))))
+        val = objective(update!(setθ!(m, θ)))
         println("objective: $val, θ: $θ")
         val
     end
     min_objective!(m.opt, obj) # set obj as the objective function (to be minimized)
     minf, minx, ret = optimize!(m.opt, m.θ) # Optimize
-    
     if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
         @warn("NLopt optimization failure: $ret")
     end
@@ -253,6 +257,19 @@ function hessian!(m::VCModel)
     m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
     #cache = FiniteDiff.HessianCache(m.θ)
     FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ)
+end
+
+
+# Lynch & Walsh p. 789
+# They give it for ml, not obj, so remove the -0.5.
+function gradient(m::VCModel)
+    s = m.data.dims.nvcomp
+    g = Vector{eltype(m.θ)}(undef, s)
+    r = m.Λ \ (m.data.y - m.μ)
+    for i ∈ 1:s        
+        g[i] = tr(m.Λ \ m.data.r[i]) - dot(r, m.data.r[i] * r)
+    end
+    g
 end
 
 # Implements
@@ -332,6 +349,7 @@ StatsBase.nobs(m::VCModel) = m.data.dims.n
 StatsBase.response(m::VCModel) = m.data.y
 
 # StatsModels
+# Check that both are reml or ml
 function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
     fterms = issubset(m1.data.X, m2.data.X)
     rterms = issubset(m1.data.r, m2.data.r)

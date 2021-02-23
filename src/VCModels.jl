@@ -26,6 +26,7 @@ export
     fit,
     fit!,
     hessian!,
+    fisherinfo!,
     # Utilities
     ranef,
     ranef!,
