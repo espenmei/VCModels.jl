@@ -44,7 +44,8 @@ export
     modelmatrix,
     nobs,
     response,
-    isnested
+    isnested,
+    f
 
 #include("optsummary.jl")
 include("vcmodel.jl")

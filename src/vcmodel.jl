@@ -9,7 +9,7 @@
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
     X::Matrix{T}
-    #r::Vector{<:AbstractMatrix{T}}
+    #r::Vector{<:AbstractMatrix{T}} # Doesnt allow Float32 for A
     r::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!?
     dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
 end
@@ -37,7 +37,8 @@ end
 - `opt`: NLopt.Opt
 - `reml`: boolean indicator for reml
 """
-struct VCModel{T<:AbstractFloat, F<:Function} <:StatsBase.StatisticalModel
+#struct VCModel{T<:AbstractFloat, F<:Function} <:StatsBase.StatisticalModel
+struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
     θ::Vector{T}
     θ_lb::Vector{T}
@@ -45,12 +46,13 @@ struct VCModel{T<:AbstractFloat, F<:Function} <:StatsBase.StatisticalModel
     Λ::Cholesky{T, Matrix{T}}
     μ::Vector{T}
     H::Array{Union{Missing, T}, 2}
-    f::F
+  #  f::F
     opt::Opt
     reml::Bool
 end
 
-function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, f::Function, reml::Bool = false) where T<:AbstractFloat
+#function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, f::Function, reml::Bool = false) where T<:AbstractFloat
+function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, reml::Bool = false) where T<:AbstractFloat
     # Create new opt object and set parameters, same defaults as MixedModels.jl
     opt = Opt(:LN_BOBYQA, length(θ_init))
     lower_bounds!(opt, θ_lb) # lower bounds
@@ -69,7 +71,7 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, f::Function, 
     cholesky!(zeros(T, n, n) + I),
     Vector{T}(undef, n),
     Array{Union{Missing, T}}(missing, s, s),
-    f,
+ #   f,
     opt,
     reml
     )
@@ -83,10 +85,12 @@ function VCModel(d::VCData, θ_lb::Vector{T},  reml::Bool = false) where T<:Abst
     d,
     fill(msse / s, s),
     θ_lb,
-    (θ::Vector{T}) -> θ, # Just set to identity
+  #  (θ::Vector{T}) -> θ, # Just set to identity
     reml
     )
 end
+
+f(m::StatisticalModel) = m.θ
 
 function update!(m::VCModel)
     updateμ!(updateΛ!(m))
@@ -100,7 +104,8 @@ end
 
 function updateΛ!(m::VCModel)    
     fill!(m.Λ.factors, zero(eltype(m.θ)))
-    δ = m.f(m.θ)
+    #δ = m.f(m.θ)
+    δ = f(m)
     for i in 1:m.data.dims.nvcomp # tar litt tid
         mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
@@ -155,7 +160,7 @@ end
 
 # Posterior means for u
 function ranef!(w::Matrix{T}, m::VCModel{T}) where T
-    δ = m.tf(m.θ)
+    δ = m.f(m.θ)
     r = m.Λ \ (m.data.y - m.μ) # Σ^-1(y - Xβ) 
     for i in 1:m.data.dims.nvcomp
         w[:, i] = δ[i] * m.data.r[i] * r
@@ -190,34 +195,42 @@ function rml(m::VCModel) # logdet(X' * Σ^-1 * X)
     logdet(X' * (m.Λ \ X))
 end
 
-# Are the constant right for reml?
+# Is the constant right for reml?
 # Negative twice normal log-likelihood
 function objective(m::VCModel)
     val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
     m.reml ? val + rml(m) : val
 end
 
-function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, sevc::Bool = false, reml::Bool = false)
+function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bool = false)
     sch = schema(f, df)
     form = apply_schema(f, sch)
     y, X = modelcols(form, df)
     d = VCData(y, X, r)
     θ_lb = fill(0.0, length(r))
     m = VCModel(d, θ_lb, reml)
-    fit!(m, sevc)
+    fit!(m)
 end
+
+#function fit!(m::VCModel)
+    #function f(θ::Vector{T}) where T
+        #θ
+    #end
+    #fit!(m, f) 
+#end
 
 function fit!(m::VCModel)
     if m.opt.numevals > 0
         throw(ArgumentError("This model has already been fitted."))
     end
+
     function obj(θ::Vector, g)
         val = objective(update!(setθ!(m, θ)))
         println("objective: $val, θ: $θ")
         val
     end
     min_objective!(m.opt, obj) # set obj as the objective function (to be minimized)
-    minf, minx, ret = optimize!(m.opt, m.θ) # Optimize
+    minf, minx, ret = optimize!(m.opt, m.θ)
     if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
         @warn("NLopt optimization failure: $ret")
     end
@@ -262,6 +275,7 @@ end
 
 # Lynch & Walsh p. 789
 # They give it for ml, not obj, so remove the -0.5.
+# https://www.biorxiv.org/content/10.1101/211821v1.full.pdf
 function gradient(m::VCModel)
     s = m.data.dims.nvcomp
     g = Vector{eltype(m.θ)}(undef, s)
