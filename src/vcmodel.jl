@@ -1,17 +1,17 @@
 """
-`VCData` stores fixed input data of a variance component model.
+`VCData` stores fixed input data of a variance component model
 # Fields
-- `y`: 'n × 1' vector of responses
+- `y`: 'n' vector of responses
 - `X`: 'n × p' matrix of covariates
-- `R`: vector of 'n × n' correlation matrices
-- `dims`: tuple with length of y, columns of X, and length of R
+- `r`: 'q' vector of 'n × n' correlation matrices
+- `dims`: tuple with n = length of y, p = columns of X, q = length of r
 """
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
     X::Matrix{T}
     #r::Vector{<:AbstractMatrix{T}} # Doesnt allow Float32 for A
     r::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!?
-    dims::NamedTuple{(:n, :p, :nvcomp), NTuple{3, Int}}
+    dims::NamedTuple{(:n, :p, :q), NTuple{3, Int}}
 end
 
 function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where T <:AbstractFloat
@@ -20,20 +20,19 @@ function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where
     y,
     X,
     r,
-    (n = size(X, 1), p = size(X, 2), nvcomp = length(r))
+    (n = size(X, 1), p = size(X, 2), q = length(r))
     )
 end
 
 """
-`VCModel` holds data, parameters and optimization info of a variance component model.
+`VCModel` holds data, parameters and optimization info of a variance component model
 # Fields
 - `data`: VCData
 - `θ`: vector of scalar variance component parameters
 - `θ_lb`: vector of lower bounds on θ
-- `Λ`: cholesky object of the model implied covariance matrix
+- `Λ`: cholesky factorization of the model implied covariance matrix
 - `μ`: vector of model implied means
-- `H`: matrix with missing or hessian of θ
-- `tf`: transformation function applied to θ during optimization
+- `H`: matrix with missing or twice inverse covariance matrix of θ
 - `opt`: NLopt.Opt
 - `reml`: boolean indicator for reml
 """
@@ -63,27 +62,26 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, reml::Bool = 
     maxeval!(opt, -1) # maximum number of function evaluations
     
     n = d.dims.n
-    s = d.dims.nvcomp
+    q = d.dims.q
     VCModel(
     d,
     θ_init,
     θ_lb,
-    cholesky!(zeros(T, n, n) + I),
+    cholesky(zeros(T, n, n) + I),
     Vector{T}(undef, n),
-    Array{Union{Missing, T}}(missing, s, s),
+    Array{Union{Missing, T}}(missing, q, q),
  #   f,
     opt,
     reml
     )
 end
 
-function VCModel(d::VCData, θ_lb::Vector{T},  reml::Bool = false) where T<:AbstractFloat
-    # Initial values
-    msse = sum(abs2, d.y - d.X * (d.X \ d.y)) / d.dims.n
-    s = d.dims.nvcomp
+function VCModel(d::VCData, θ_lb::Vector{<:AbstractFloat},  reml::Bool = false)
+    msse = sum(abs2, d.y - d.X * (d.X \ d.y)) / d.dims.n # Initial values
+    q = d.dims.q
     VCModel(
     d,
-    fill(msse / s, s),
+    fill(msse / q, q),
     θ_lb,
   #  (θ::Vector{T}) -> θ, # Just set to identity
     reml
@@ -92,8 +90,8 @@ end
 
 f(m::StatisticalModel) = m.θ
 
-function update!(m::VCModel)
-    updateμ!(updateΛ!(m))
+function update!(m::VCModel, θ::Vector)
+    updateμ!(updateΛ!(setθ!(m, θ)))
     m
 end
 
@@ -104,13 +102,11 @@ end
 
 function updateΛ!(m::VCModel)    
     fill!(m.Λ.factors, zero(eltype(m.θ)))
-    #δ = m.f(m.θ)
-    δ = f(m)
-    for i in 1:m.data.dims.nvcomp # tar litt tid
+    δ = f(m) #δ = m.f(m.θ)
+    for i in 1:m.data.dims.q # tar litt tid
         mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
-    # Update the cholesky factorization object
-    cholesky!(Symmetric(m.Λ.factors, :U)) # Tar mest tid
+    cholesky!(Symmetric(m.Λ.factors, :U)) # Update the cholesky factorization object (Tar mest tid)
     m
 end
 
@@ -123,6 +119,111 @@ function updateμ!(m::VCModel)
     m
 end
 
+function dfresidual(m::VCModel)::Int
+    n = m.data.dims.n
+    m.reml ? n - m.data.dims.p : n
+end
+
+# http://hua-zhou.github.io/teaching/biostatm280-2019spring/slides/10-chol/chol.html#Multivariate-normal-density
+# Weighted residual sums of squares
+# (y - Xβ)'Σ^-1(y - Xβ)
+# Same as y'Py in Lynch & Walsh
+# Same as trace(Σ^-1 * (y - Xβ)(y - Xβ)')
+function wrss(m::VCModel)
+    r = m.data.y - m.μ
+    dot(r, m.Λ \ r)
+end
+
+# Pawitan p. 441
+function rml(m::VCModel) # logdet(X' * Σ^-1 * X)
+    X = m.data.X
+    logdet(X' * (m.Λ \ X))
+end
+
+# Negative twice normal log-likelihood
+# Is the constant right for reml?
+function objective(m::VCModel)
+    val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
+    m.reml ? val + rml(m) : val
+end
+
+function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bool = false)
+    sch = schema(f, df)
+    form = apply_schema(f, sch)
+    y, X = modelcols(form, df)
+    d = VCData(y, X, r)
+    θ_lb = fill(0.0, length(r))
+    m = VCModel(d, θ_lb, reml)
+    fit!(m)
+end
+
+function fit!(m::VCModel)
+    if m.opt.numevals > 0
+        throw(ArgumentError("This model has already been fitted"))
+    end
+    function obj(θ::Vector, g)
+        val = objective(update!(m, θ))
+        println("objective: $val, θ: $θ")
+        val
+    end
+    min_objective!(m.opt, obj)
+    minf, minx, ret = optimize!(m.opt, m.θ)
+    if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
+        @warn("NLopt optimization failure: $ret")
+    end
+    m
+end
+
+# Lynch & Walsh p. 789 
+function fisherinfo!(m::VCModel)
+    if m.opt.numevals <= 0
+        @warn("This model has not been fitted")
+        return nothing
+    end
+    n = m.data.dims.n
+    Rstore = Matrix{eltype(m.θ)}(undef, n, n)
+    q = m.data.dims.q
+    for i ∈ 1:q, j ∈ 1:i
+        ldiv!(Rstore, m.Λ, m.data.r[i])
+        if j == i
+            #m.H[i,j] = dot(r1, r1)
+            m.H[i,j] = sum(abs2, Rstore)
+        else
+            #r2 = m.Λ \ m.data.r[j]
+            m.H[i,j] = m.H[j,i] = dot(Rstore, m.Λ \ m.data.r[j])
+        end
+    end
+end
+
+function hessian!(m::VCModel)
+    if m.opt.numevals <= 0
+        @warn("This model has not been fitted")
+        return nothing
+    end
+    function obj(x::Vector)
+        val = objective(updateμ!(updateΛ!(setθ!(m_tmp, x))))
+        println("objective: $val, θ: $x")
+        val
+    end
+    m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
+    #cache = FiniteDiff.HessianCache(m.θ)
+    FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ)
+end
+
+
+# Lynch & Walsh p. 789
+# They give it for ml, not obj, so remove the -0.5.
+# https://www.biorxiv.org/content/10.1101/211821v1.full.pdf
+function gradient(m::VCModel)
+    q = m.data.dims.q
+    g = Vector{eltype(m.θ)}(undef, q)
+    r = m.Λ \ (m.data.y - m.μ)
+    for i ∈ 1:q        
+        g[i] = tr(m.Λ \ m.data.r[i]) - dot(r, m.data.r[i] * r)
+    end
+    g
+end
+
 function vcov(m::VCModel)
     X = m.data.X
     inv(X' * (m.Λ \ X))
@@ -130,10 +231,7 @@ end
 
 function vcovvc(m::VCModel)
     H = m.H
-    if !any(ismissing.(H))
-        H = inv(0.5 * H)
-    end
-    H    
+    any(ismissing.(H)) ? H : inv(0.5 * H)
 end
 
 function vcovvctr(m::VCModel)
@@ -162,128 +260,15 @@ end
 function ranef!(w::Matrix{T}, m::VCModel{T}) where T
     δ = m.f(m.θ)
     r = m.Λ \ (m.data.y - m.μ) # Σ^-1(y - Xβ) 
-    for i in 1:m.data.dims.nvcomp
+    for i in 1:m.data.dims.q
         w[:, i] = δ[i] * m.data.r[i] * r
     end
     w
 end
 
 function ranef(m::VCModel{T}) where T
-    w = Matrix{T}(undef, m.data.dims.n, m.data.dims.nvcomp)
+    w = Matrix{T}(undef, m.data.dims.n, m.data.dims.q)
     ranef!(w, m)
-end
-
-function dfresidual(m::VCModel)::Int
-    n = m.data.dims.n
-    m.reml ? n - m.data.dims.p : n
-end
-
-# Denne er nå billig!
-# http://hua-zhou.github.io/teaching/biostatm280-2019spring/slides/10-chol/chol.html#Multivariate-normal-density
-# Weighted residual sums of squares
-# (y - Xβ)'Σ^-1(y - Xβ)
-# Same as y'Py in Lynch & Walsh
-# Same as trace(Σ^-1 * (y - Xβ)(y - Xβ)')
-function wrss(m::VCModel)
-    r = m.data.y - m.μ
-    dot(r, m.Λ \ r)
-end
-
-# Pawitan p. 441
-function rml(m::VCModel) # logdet(X' * Σ^-1 * X)
-    X = m.data.X
-    logdet(X' * (m.Λ \ X))
-end
-
-# Is the constant right for reml?
-# Negative twice normal log-likelihood
-function objective(m::VCModel)
-    val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
-    m.reml ? val + rml(m) : val
-end
-
-function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bool = false)
-    sch = schema(f, df)
-    form = apply_schema(f, sch)
-    y, X = modelcols(form, df)
-    d = VCData(y, X, r)
-    θ_lb = fill(0.0, length(r))
-    m = VCModel(d, θ_lb, reml)
-    fit!(m)
-end
-
-#function fit!(m::VCModel)
-    #function f(θ::Vector{T}) where T
-        #θ
-    #end
-    #fit!(m, f) 
-#end
-
-function fit!(m::VCModel)
-    if m.opt.numevals > 0
-        throw(ArgumentError("This model has already been fitted."))
-    end
-
-    function obj(θ::Vector, g)
-        val = objective(update!(setθ!(m, θ)))
-        println("objective: $val, θ: $θ")
-        val
-    end
-    min_objective!(m.opt, obj) # set obj as the objective function (to be minimized)
-    minf, minx, ret = optimize!(m.opt, m.θ)
-    if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
-        @warn("NLopt optimization failure: $ret")
-    end
-    m
-end
-
-# Lynch & Walsh p. 789 
-function fisherinfo!(m::VCModel)
-    if m.opt.numevals <= 0
-        @warn("This model has not been fitted.")
-        return nothing
-    end
-    s = m.data.dims.nvcomp
-    S = Matrix{Float64}(undef, s, s)
-    for i ∈ 1:s, j ∈ 1:i
-        r1 = m.Λ \ m.data.r[i]
-        if j == i
-            S[i,j] = dot(r1, r1)
-        else
-            r2 = m.Λ \ m.data.r[j]
-            S[i,j] = S[j,i] = dot(r1, r2)           
-        end
-    end
-    copyto!(m.H, S)
-end
-
-function hessian!(m::VCModel)
-    if m.opt.numevals <= 0
-        @warn("This model has not been fitted.")
-        return nothing
-    end
-    function obj(x::Vector)
-        val = objective(updateμ!(updateΛ!(setθ!(m_tmp, x))))
-        println("objective: $val, θ: $x")
-        val
-    end
-    m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
-    #cache = FiniteDiff.HessianCache(m.θ)
-    FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ)
-end
-
-
-# Lynch & Walsh p. 789
-# They give it for ml, not obj, so remove the -0.5.
-# https://www.biorxiv.org/content/10.1101/211821v1.full.pdf
-function gradient(m::VCModel)
-    s = m.data.dims.nvcomp
-    g = Vector{eltype(m.θ)}(undef, s)
-    r = m.Λ \ (m.data.y - m.μ)
-    for i ∈ 1:s        
-        g[i] = tr(m.Λ \ m.data.r[i]) - dot(r, m.data.r[i] * r)
-    end
-    g
 end
 
 # Implements
@@ -347,10 +332,10 @@ end
 
 StatsBase.deviance(m::VCModel) = objective(m)
 
-StatsBase.dof(m::VCModel) = m.data.dims.p + m.data.dims.nvcomp
+StatsBase.dof(m::VCModel) = m.data.dims.p + m.data.dims.q
 
 function StatsBase.dof_residual(m::VCModel)::Int
-    m.data.dims.n - m.data.dims.p - m.data.dims.nvcomp
+    m.data.dims.n - m.data.dims.p - m.data.dims.q
 end
 
 # Error for reml?
@@ -363,9 +348,13 @@ StatsBase.nobs(m::VCModel) = m.data.dims.n
 StatsBase.response(m::VCModel) = m.data.y
 
 # StatsModels
-# Check that both are reml or ml
+# Check that both are reml or ml. For reml X == X must hold.
 function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
+    criterion = m1.reml == m2.reml
     fterms = issubset(m1.data.X, m2.data.X)
     rterms = issubset(m1.data.r, m2.data.r)
-    fterms && rterms
+    if m1.reml == true && m2.reml == true
+        fterms = m1.data.X == m2.data.X
+    end
+    criterion && fterms && rterms
 end

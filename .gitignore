@@ -1,5 +1,6 @@
 .vscode/
 text/
+div/
 init.jl
 init_trio.jl
 .gitignore
