@@ -142,6 +142,7 @@ end
 
 # Negative twice normal log-likelihood
 # Is the constant right for reml?
+# I think the error for non PD comes from logdet(m.Λ)
 function objective(m::VCModel)
     val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
     m.reml ? val + rml(m) : val
@@ -174,6 +175,7 @@ function fit!(m::VCModel)
     m
 end
 
+# Undersøk denne med flere vc!
 # Lynch & Walsh p. 789 
 function fisherinfo!(m::VCModel)
     if m.opt.numevals <= 0
