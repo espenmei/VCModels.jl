@@ -6,28 +6,32 @@ using Base: Ryu
 using Distributions
 using StatsBase
 using StatsModels
-using DataFrames
+using DataFrames: DataFrame
 using FiniteDiff
 
+import StatsBase: fit, fit! # Can now call fit, fit! directly
 #import NLopt: Opt
 
 export
     # Structs/constructors 
     VCData,
-    VCData2,
     VCModel,
     # Computations
+    update!,
     setθ!,
     updateΛ!,
     updateμ!,
-    fixef,
-    fixef!,
     objective,
     fit,
     fit!,
+    gradient,
+    gradient!,
     hessian!,
     fisherinfo!,
+    transform,
     # Utilities
+    fixef,
+    fixef!,
     ranef,
     ranef!,
     vcov,
@@ -44,10 +48,8 @@ export
     modelmatrix,
     nobs,
     response,
-    isnested,
-    f
+    isnested
 
-#include("optsummary.jl")
 include("vcmodel.jl")
-
+include("optimization.jl")
 end # module

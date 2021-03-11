@@ -4,13 +4,12 @@
 - `y`: 'n' vector of responses
 - `X`: 'n × p' matrix of covariates
 - `r`: 'q' vector of 'n × n' correlation matrices
-- `dims`: tuple with n = length of y, p = columns of X, q = length of r
+- `dims`: tuple of n = length of y, p = columns of X, q = length of r
 """
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
     X::Matrix{T}
-    #r::Vector{<:AbstractMatrix{T}} # Doesnt allow Float32 for A
-    r::Vector{<:AbstractMatrix} # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse!?
+    r::Vector{<:AbstractMatrix} # Vector{<:AbstractMatrix{T}} Doesnt allow Float32 for A # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse?
     dims::NamedTuple{(:n, :p, :q), NTuple{3, Int}}
 end
 
@@ -36,33 +35,27 @@ end
 - `opt`: NLopt.Opt
 - `reml`: boolean indicator for reml
 """
-#struct VCModel{T<:AbstractFloat, F<:Function} <:StatsBase.StatisticalModel
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
     θ::Vector{T}
     θ_lb::Vector{T}
-    #Λ::Cholesky{T}
-    Λ::Cholesky{T, Matrix{T}}
+    Λ::Cholesky{T, Matrix{T}} #Λ::Cholesky{T}
     μ::Vector{T}
     H::Array{Union{Missing, T}, 2}
-  #  f::F
     opt::Opt
     reml::Bool
 end
 
 #function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, f::Function, reml::Bool = false) where T<:AbstractFloat
 function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, reml::Bool = false) where T<:AbstractFloat
-    # Create new opt object and set parameters, same defaults as MixedModels.jl
-    opt = Opt(:LN_BOBYQA, length(θ_init))
+    opt = Opt(:LN_BOBYQA, length(θ_init)) # Create new opt object and set parameters, same defaults as MixedModels.jl
     lower_bounds!(opt, θ_lb) # lower bounds
     ftol_rel!(opt, T(1.0e-12)) # relative criterion on objective
     ftol_abs!(opt, T(1.0e-8)) # absolute criterion on objective   
     xtol_rel!(opt, zero(T)) # relative criterion on parameter values
     xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
-    maxeval!(opt, -1) # maximum number of function evaluations
-    
-    n = d.dims.n
-    q = d.dims.q
+    maxeval!(opt, -1) # no limits on number of function evaluations
+    n, _, q = d.dims
     VCModel(
     d,
     θ_init,
@@ -70,25 +63,30 @@ function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, reml::Bool = 
     cholesky(zeros(T, n, n) + I),
     Vector{T}(undef, n),
     Array{Union{Missing, T}}(missing, q, q),
- #   f,
     opt,
     reml
     )
 end
 
 function VCModel(d::VCData, θ_lb::Vector{<:AbstractFloat},  reml::Bool = false)
-    msse = sum(abs2, d.y - d.X * (d.X \ d.y)) / d.dims.n # Initial values
-    q = d.dims.q
     VCModel(
     d,
-    fill(msse / q, q),
+    initialvalues(d),
     θ_lb,
-  #  (θ::Vector{T}) -> θ, # Just set to identity
     reml
     )
 end
 
-f(m::StatisticalModel) = m.θ
+function initialvalues(d::VCData)
+    n, _, q = d.dims
+    X = d.X
+    y = d.y
+    β = X \ y
+    msse = sum(abs2, y - X * β) / n
+    fill(msse / q, q)
+end
+
+transform(m::StatisticalModel) = m.θ
 
 function update!(m::VCModel, θ::Vector)
     updateμ!(updateΛ!(setθ!(m, θ)))
@@ -100,10 +98,11 @@ function setθ!(m::VCModel, θ::Vector)
     m
 end
 
+# Is the error for non-PD comes from cholesky!?
 function updateΛ!(m::VCModel)    
+    δ = transform(m) #δ = m.f(m.θ)
     fill!(m.Λ.factors, zero(eltype(m.θ)))
-    δ = f(m) #δ = m.f(m.θ)
-    for i in 1:m.data.dims.q # tar litt tid
+    for i ∈ 1:m.data.dims.q
         mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
     cholesky!(Symmetric(m.Λ.factors, :U)) # Update the cholesky factorization object (Tar mest tid)
@@ -111,11 +110,11 @@ function updateΛ!(m::VCModel)
 end
 
 # Generalized least squares for β
-# Pawitan p. 440 (X'Σ^-1X)β = X'Σ^-1y
+# Pawitan p. 440 (X'V^-1X)β = X'V^-1y
 function updateμ!(m::VCModel)
     X = m.data.X
-    ΣinvX = m.Λ \ X # Σ^-1X
-    mul!(m.μ, X, (X' * ΣinvX) \ (ΣinvX' * m.data.y))
+    invVX = m.Λ \ X # V^-1X
+    mul!(m.μ, X, (X' * invVX) \ (invVX' * m.data.y))
     m
 end
 
@@ -126,119 +125,50 @@ end
 
 # http://hua-zhou.github.io/teaching/biostatm280-2019spring/slides/10-chol/chol.html#Multivariate-normal-density
 # Weighted residual sums of squares
-# (y - Xβ)'Σ^-1(y - Xβ)
+# (y - Xβ)'V^-1(y - Xβ)
 # Same as y'Py in Lynch & Walsh
-# Same as trace(Σ^-1 * (y - Xβ)(y - Xβ)')
+# Same as trace(V^-1 * (y - Xβ)(y - Xβ)')
 function wrss(m::VCModel)
-    r = m.data.y - m.μ
-    dot(r, m.Λ \ r)
+    ϵ = m.data.y - m.μ
+    dot(ϵ, m.Λ \ ϵ)
 end
 
+# Adjustment for reml likelihood
 # Pawitan p. 441
-function rml(m::VCModel) # logdet(X' * Σ^-1 * X)
+# X' * V^-1 * X
+# Its almost computed in μ but cheap 
+function rml(m::VCModel)
     X = m.data.X
     logdet(X' * (m.Λ \ X))
 end
 
 # Negative twice normal log-likelihood
 # Is the constant right for reml?
-# I think the error for non PD comes from logdet(m.Λ)
+# I think the error for non-PD comes from logdet(m.Λ)
 function objective(m::VCModel)
     val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
     m.reml ? val + rml(m) : val
 end
 
-function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bool = false)
-    sch = schema(f, df)
-    form = apply_schema(f, sch)
-    y, X = modelcols(form, df)
-    d = VCData(y, X, r)
-    θ_lb = fill(0.0, length(r))
-    m = VCModel(d, θ_lb, reml)
-    fit!(m)
-end
-
-function fit!(m::VCModel)
-    if m.opt.numevals > 0
-        throw(ArgumentError("This model has already been fitted"))
-    end
-    function obj(θ::Vector, g)
-        val = objective(update!(m, θ))
-        println("objective: $val, θ: $θ")
-        val
-    end
-    min_objective!(m.opt, obj)
-    minf, minx, ret = optimize!(m.opt, m.θ)
-    if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
-        @warn("NLopt optimization failure: $ret")
-    end
-    m
-end
-
-# Undersøk denne med flere vc!
-# Lynch & Walsh p. 789 
-function fisherinfo!(m::VCModel)
-    if m.opt.numevals <= 0
-        @warn("This model has not been fitted")
-        return nothing
-    end
-    n = m.data.dims.n
-    Rstore = Matrix{eltype(m.θ)}(undef, n, n)
-    q = m.data.dims.q
-    for i ∈ 1:q, j ∈ 1:i
-        ldiv!(Rstore, m.Λ, m.data.r[i])
-        if j == i
-            #m.H[i,j] = dot(r1, r1)
-            m.H[i,j] = sum(abs2, Rstore)
-        else
-            #r2 = m.Λ \ m.data.r[j]
-            m.H[i,j] = m.H[j,i] = dot(Rstore, m.Λ \ m.data.r[j])
-        end
-    end
-end
-
-function hessian!(m::VCModel)
-    if m.opt.numevals <= 0
-        @warn("This model has not been fitted")
-        return nothing
-    end
-    function obj(x::Vector)
-        val = objective(updateμ!(updateΛ!(setθ!(m_tmp, x))))
-        println("objective: $val, θ: $x")
-        val
-    end
-    m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
-    #cache = FiniteDiff.HessianCache(m.θ)
-    FiniteDiff.finite_difference_hessian!(m.H, obj, m.θ)
-end
-
-
-# Lynch & Walsh p. 789
-# They give it for ml, not obj, so remove the -0.5.
-# https://www.biorxiv.org/content/10.1101/211821v1.full.pdf
-function gradient(m::VCModel)
-    q = m.data.dims.q
-    g = Vector{eltype(m.θ)}(undef, q)
-    r = m.Λ \ (m.data.y - m.μ)
-    for i ∈ 1:q        
-        g[i] = tr(m.Λ \ m.data.r[i]) - dot(r, m.data.r[i] * r)
-    end
-    g
-end
-
+# Covariance of fixed effects
 function vcov(m::VCModel)
     X = m.data.X
     inv(X' * (m.Λ \ X))
 end
 
+# covariance of variance components
+# scale to to minimum of -2L
 function vcovvc(m::VCModel)
     H = m.H
     any(ismissing.(H)) ? H : inv(0.5 * H)
 end
 
+# covariance of transformed variance components
+# Denne kædder vel med m!?
+transform(θ::Vector) = θ 
 function vcovvctr(m::VCModel)
-    J = FiniteDiff.finite_difference_jacobian(m.f, m.θ)
-    J, J * vcovvc(m) * J'
+    J = FiniteDiff.finite_difference_jacobian(transform, m.θ)
+    J * vcovvc(m) * J'
 end
 
 function stderror(m::VCModel)
@@ -260,10 +190,10 @@ end
 
 # Posterior means for u
 function ranef!(w::Matrix{T}, m::VCModel{T}) where T
-    δ = m.f(m.θ)
-    r = m.Λ \ (m.data.y - m.μ) # Σ^-1(y - Xβ) 
+    δ = transform(m.θ)
+    invVϵ = m.Λ \ (m.data.y - m.μ) # V^-1(y - Xβ) 
     for i in 1:m.data.dims.q
-        w[:, i] = δ[i] * m.data.r[i] * r
+        w[:, i] = δ[i] * m.data.r[i] * invVϵ
     end
     w
 end
@@ -274,45 +204,6 @@ function ranef(m::VCModel{T}) where T
 end
 
 # Implements
-# Base
-function Base.show(io::IO, m::VCModel)
-    if m.opt.numevals <= 0
-        @warn("This model has not been fitted.")
-        return nothing
-    end
-    oo = objective(m)
-    nums = Ryu.writefixed.([-0.5 * oo, oo, aic(m), aicc(m), bic(m)], 4)
-    cols = ["logLik", "-2 logLik", "AIC", "AICc", "BIC"]
-    fieldwd = max(maximum(textwidth.(nums)) + 1, 11)
-    for i in cols
-        print(io, rpad(i, fieldwd))
-    end
-    println(io)
-    for i in nums
-        print(io, rpad(i, fieldwd))
-    end
-    println(io)
-    println(io)
-    println(io, " Variance component parameters:")
-
-    numsvc = Ryu.writefixed.(m.θ, 4)
-    vcse = stderrorvc(m)
-    numsvcse = fill('-', length(vcse))
-    if !any(ismissing.(vcse))
-        numsvcse = Ryu.writefixed.(vcse, 4)
-    end
-    for label in ["Comp.", "Est.", "Std. Error"]
-        print(io, label, "\t")
-    end
-    println(io)
-    for i in 1:length(numsvc)
-        print(io, "θ" * Char(0x2080 + i), "\t", numsvc[i], "\t", numsvcse[i], "\n")
-    end
-    println(io)
-    println(io, " Fixed-effects parameters:")
-    show(io, coeftable(m))
-end
-
 # StatsBase
 StatsBase.coef(m::VCModel) = fixef(m)
 
@@ -359,4 +250,43 @@ function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
         fterms = m1.data.X == m2.data.X
     end
     criterion && fterms && rterms
+end
+
+# Base
+function Base.show(io::IO, m::VCModel)
+    if m.opt.numevals <= 0
+        @warn("This model has not been fitted.")
+        return nothing
+    end
+    oo = objective(m)
+    nums = Ryu.writefixed.([-0.5 * oo, oo, aic(m), aicc(m), bic(m)], 4)
+    cols = ["logLik", "-2 logLik", "AIC", "AICc", "BIC"]
+    fieldwd = max(maximum(textwidth.(nums)) + 1, 11)
+    for i in cols
+        print(io, rpad(i, fieldwd))
+    end
+    println(io)
+    for i in nums
+        print(io, rpad(i, fieldwd))
+    end
+    println(io)
+    println(io)
+    println(io, " Variance component parameters:")
+
+    numsvc = Ryu.writefixed.(m.θ, 4)
+    vcse = stderrorvc(m)
+    numsvcse = fill('-', length(vcse))
+    if !any(ismissing.(vcse))
+        numsvcse = Ryu.writefixed.(vcse, 4)
+    end
+    for label in ["Comp.", "Est.", "Std. Error"]
+        print(io, label, "\t")
+    end
+    println(io)
+    for i in 1:length(numsvc)
+        print(io, "θ" * Char(0x2080 + i), "\t", numsvc[i], "\t", numsvcse[i], "\n")
+    end
+    println(io)
+    println(io, " Fixed-effects parameters:")
+    show(io, coeftable(m))
 end
