@@ -3,4 +3,5 @@ text/
 div/
 init.jl
 init_trio.jl
+notes.jl
 .gitignore

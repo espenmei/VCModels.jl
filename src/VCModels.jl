@@ -10,12 +10,13 @@ using DataFrames: DataFrame
 using FiniteDiff
 
 import StatsBase: fit, fit! # Can now call fit, fit! directly
-#import NLopt: Opt
+#import NLopt: Opt # overwrites
 
 export
     # Structs/constructors 
     VCData,
     VCModel,
+    VCOpt,
     # Computations
     update!,
     setθ!,
@@ -26,8 +27,9 @@ export
     fit!,
     gradient,
     gradient!,
+    hessian,
     hessian!,
-    fisherinfo!,
+   # fisherinfo!,
     transform,
     # Utilities
     fixef,
@@ -50,6 +52,9 @@ export
     response,
     isnested
 
-include("vcmodel.jl")
+# Order matters!
 include("optimization.jl")
+include("vcmodel.jl")
+include("algorithms.jl")
+
 end # module

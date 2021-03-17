@@ -1,5 +1,5 @@
 """
-`VCData` stores fixed input data of a variance component model
+`VCData` holds observed input data of a variance component model
 # Fields
 - `y`: 'n' vector of responses
 - `X`: 'n × p' matrix of covariates
@@ -9,18 +9,14 @@
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
     X::Matrix{T}
-    r::Vector{<:AbstractMatrix} # Vector{<:AbstractMatrix{T}} Doesnt allow Float32 for A # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse?
+    r::Vector{<:AbstractMatrix} # Vector{<:AbstractMatrix{T}} Doesn't allow Float32 for A # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse?
     dims::NamedTuple{(:n, :p, :q), NTuple{3, Int}}
 end
 
-function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where T <:AbstractFloat
+function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where T<:AbstractFloat
     X = reshape(X, :, size(X, 2)) # Make sure X is a matrix
-    VCData(
-    y,
-    X,
-    r,
-    (n = size(X, 1), p = size(X, 2), q = length(r))
-    )
+    dims = (n = size(X, 1), p = size(X, 2), q = length(r))
+    VCData(y, X, r, dims)
 end
 
 """
@@ -28,44 +24,34 @@ end
 # Fields
 - `data`: VCData
 - `θ`: vector of scalar variance component parameters
-- `θ_lb`: vector of lower bounds on θ
 - `Λ`: cholesky factorization of the model implied covariance matrix
 - `μ`: vector of model implied means
 - `H`: matrix with missing or twice inverse covariance matrix of θ
-- `opt`: NLopt.Opt
-- `reml`: boolean indicator for reml
+- `opt`: VCOpt
 """
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
     θ::Vector{T}
-    θ_lb::Vector{T}
     Λ::Cholesky{T, Matrix{T}} #Λ::Cholesky{T}
     μ::Vector{T}
-    H::Array{Union{Missing, T}, 2}
-    opt::Opt
-    reml::Bool
+    #H::Matrix{Union{Missing, T}}
+    opt::VCOpt
 end
 
-#function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, f::Function, reml::Bool = false) where T<:AbstractFloat
 function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, reml::Bool = false) where T<:AbstractFloat
-    opt = Opt(:LN_BOBYQA, length(θ_init)) # Create new opt object and set parameters, same defaults as MixedModels.jl
-    lower_bounds!(opt, θ_lb) # lower bounds
-    ftol_rel!(opt, T(1.0e-12)) # relative criterion on objective
-    ftol_abs!(opt, T(1.0e-8)) # absolute criterion on objective   
-    xtol_rel!(opt, zero(T)) # relative criterion on parameter values
-    xtol_abs!(opt, T(1.0e-10)) # absolute criterion on parameter values   
-    maxeval!(opt, -1) # no limits on number of function evaluations
     n, _, q = d.dims
-    VCModel(
+    m = VCModel(
     d,
     θ_init,
-    θ_lb,
     cholesky(zeros(T, n, n) + I),
-    Vector{T}(undef, n),
-    Array{Union{Missing, T}}(missing, q, q),
-    opt,
-    reml
+    zeros(T, n),
+    #Matrix{Union{Missing, T}}(missing, q, q),
+    VCOpt(:LN_BOBYQA, θ_init, θ_lb, reml)
     )
+    # Gjør et update her?
+    update!(m, m.θ)
+    m.opt.finitial = objective(m)
+    m    
 end
 
 function VCModel(d::VCData, θ_lb::Vector{<:AbstractFloat},  reml::Bool = false)
@@ -76,6 +62,8 @@ function VCModel(d::VCData, θ_lb::Vector{<:AbstractFloat},  reml::Bool = false)
     reml
     )
 end
+
+isreml(m::VCModel) = m.opt.reml
 
 function initialvalues(d::VCData)
     n, _, q = d.dims
@@ -98,12 +86,30 @@ function setθ!(m::VCModel, θ::Vector)
     m
 end
 
-# Is the error for non-PD comes from cholesky!?
+# Only fill the upper triangle
+ function scaleUpperTri!(M, δ, R)
+    @inbounds for i ∈ 1:size(M, 2)
+        @inbounds for j ∈ 1:i
+            M[j,i] += δ * R[j,i]
+        end
+    end
+    M
+end
+
+function scaleUpperTri!(M, δ, R::Diagonal)
+    @inbounds for i ∈ 1:size(M, 2)
+        M[i,i] += δ
+    end
+    M
+end
+
+# Does the error for non-PD comes from cholesky!?
 function updateΛ!(m::VCModel)    
     δ = transform(m) #δ = m.f(m.θ)
     fill!(m.Λ.factors, zero(eltype(m.θ)))
     for i ∈ 1:m.data.dims.q
-        mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
+        #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
+        scaleUpperTri!(m.Λ.factors, δ[i], m.data.r[i])
     end
     cholesky!(Symmetric(m.Λ.factors, :U)) # Update the cholesky factorization object (Tar mest tid)
     m
@@ -119,8 +125,8 @@ function updateμ!(m::VCModel)
 end
 
 function dfresidual(m::VCModel)::Int
-    n = m.data.dims.n
-    m.reml ? n - m.data.dims.p : n
+    n, p, _ = m.data.dims
+    isreml(m) ? n - p : n
 end
 
 # http://hua-zhou.github.io/teaching/biostatm280-2019spring/slides/10-chol/chol.html#Multivariate-normal-density
@@ -135,8 +141,7 @@ end
 
 # Adjustment for reml likelihood
 # Pawitan p. 441
-# X' * V^-1 * X
-# Its almost computed in μ but cheap 
+# X' * V^-1 * X - It's computed in μ but cheap 
 function rml(m::VCModel)
     X = m.data.X
     logdet(X' * (m.Λ \ X))
@@ -147,7 +152,7 @@ end
 # I think the error for non-PD comes from logdet(m.Λ)
 function objective(m::VCModel)
     val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
-    m.reml ? val + rml(m) : val
+    isreml(m) ? val + rml(m) : val
 end
 
 # Covariance of fixed effects
@@ -157,15 +162,15 @@ function vcov(m::VCModel)
 end
 
 # covariance of variance components
-# scale to to minimum of -2L
+# scale to minimum of -2L
 function vcovvc(m::VCModel)
-    H = m.H
+    H = m.opt.H
     any(ismissing.(H)) ? H : inv(0.5 * H)
 end
 
 # covariance of transformed variance components
-# Denne kædder vel med m!?
-transform(θ::Vector) = θ 
+# Denne kædder vel med m!? lag en copy.
+# transform(θ::Vector) = θ 
 function vcovvctr(m::VCModel)
     J = FiniteDiff.finite_difference_jacobian(transform, m.θ)
     J * vcovvc(m) * J'
@@ -201,6 +206,38 @@ end
 function ranef(m::VCModel{T}) where T
     w = Matrix{T}(undef, m.data.dims.n, m.data.dims.q)
     ranef!(w, m)
+end
+
+function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bool=false)
+    sch = schema(f, df)
+    form = apply_schema(f, sch)
+    y, X = modelcols(form, df)
+    d = VCData(y, X, r)
+    θ_lb = fill(0.0, length(r))
+    m = VCModel(d, θ_lb, reml)
+    fit!(m)
+end
+
+function fit!(m::VCModel)
+    if m.opt.feval > 0
+        throw(ArgumentError("This model has already been fitted"))
+    end
+    # Det er jo egentlig gjort ett update når modellen ble laget. Men da må du stole på at modellen ikke har blitt klussa med.
+    function obj(θ::Vector, g)
+        val = objective(update!(m, θ))
+        showiter(val, θ)
+        val
+    end
+    opt = Opt(m.opt)
+    min_objective!(opt, obj)
+    minf, minx, ret = optimize!(opt, m.θ)
+    
+    if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
+        @warn("NLopt optimization failure: $ret")
+    end
+    # update the VCOpt object
+    m.opt.feval = opt.numevals
+    m
 end
 
 # Implements
@@ -254,7 +291,7 @@ end
 
 # Base
 function Base.show(io::IO, m::VCModel)
-    if m.opt.numevals <= 0
+    if m.opt.feval <= 0
         @warn("This model has not been fitted.")
         return nothing
     end
