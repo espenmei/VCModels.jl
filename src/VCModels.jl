@@ -8,6 +8,7 @@ using StatsBase
 using StatsModels
 using DataFrames: DataFrame
 using FiniteDiff
+using LoopVectorization
 
 import StatsBase: fit, fit! # Can now call fit, fit! directly
 #import NLopt: Opt # overwrites

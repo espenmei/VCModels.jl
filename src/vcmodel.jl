@@ -26,32 +26,31 @@ end
 - `θ`: vector of scalar variance component parameters
 - `Λ`: cholesky factorization of the model implied covariance matrix
 - `μ`: vector of model implied means
-- `H`: matrix with missing or twice inverse covariance matrix of θ
-- `opt`: VCOpt
+- `opt`: VCOpt with optimization info
 """
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
     θ::Vector{T}
     Λ::Cholesky{T, Matrix{T}} #Λ::Cholesky{T}
     μ::Vector{T}
-    #H::Matrix{Union{Missing, T}}
     opt::VCOpt
 end
 
-function VCModel(d::VCData, θ_init::Vector{T},  θ_lb::Vector{T}, reml::Bool = false) where T<:AbstractFloat
-    n, _, q = d.dims
+function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false) where T<:AbstractFloat
+    n = d.dims.n
     m = VCModel(
-    d,
-    θ_init,
-    cholesky(zeros(T, n, n) + I),
-    zeros(T, n),
-    #Matrix{Union{Missing, T}}(missing, q, q),
-    VCOpt(:LN_BOBYQA, θ_init, θ_lb, reml)
-    )
+        d,
+        θ,
+        cholesky(zeros(T, n, n) + I),
+        zeros(T, n),
+        VCOpt(:LN_BOBYQA, copy(θ), θ_lb, reml)
+        )
     # Gjør et update her?
     update!(m, m.θ)
     m.opt.finitial = objective(m)
-    m    
+    copyto!(m.opt.xfinal, m.opt.xinitial)
+    m.opt.ffinal = m.opt.finitial
+    m
 end
 
 function VCModel(d::VCData, θ_lb::Vector{<:AbstractFloat},  reml::Bool = false)
@@ -88,8 +87,8 @@ end
 
 # Only fill the upper triangle
  function scaleUpperTri!(M, δ, R)
-    @inbounds for i ∈ 1:size(M, 2)
-        @inbounds for j ∈ 1:i
+    for i ∈ 1:size(M, 2) #for i ∈ axes(M, 2)
+         for j ∈ 1:i
             M[j,i] += δ * R[j,i]
         end
     end
@@ -97,20 +96,20 @@ end
 end
 
 function scaleUpperTri!(M, δ, R::Diagonal)
-    @inbounds for i ∈ 1:size(M, 2)
-        M[i,i] += δ
+    for i ∈ 1:size(M, 2)
+        M[i,i] += δ * R[i,i]
     end
     M
 end
 
-# Does the error for non-PD comes from cholesky!?
 function updateΛ!(m::VCModel)    
-    δ = transform(m) #δ = m.f(m.θ)
+    δ = transform(m)
     fill!(m.Λ.factors, zero(eltype(m.θ)))
     for i ∈ 1:m.data.dims.q
         #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
         scaleUpperTri!(m.Λ.factors, δ[i], m.data.r[i])
     end
+    # Does the error for non-PD comes from cholesky?
     cholesky!(Symmetric(m.Λ.factors, :U)) # Update the cholesky factorization object (Tar mest tid)
     m
 end
@@ -119,7 +118,7 @@ end
 # Pawitan p. 440 (X'V^-1X)β = X'V^-1y
 function updateμ!(m::VCModel)
     X = m.data.X
-    invVX = m.Λ \ X # V^-1X
+    invVX = m.Λ \ X # V^-1X # allocations
     mul!(m.μ, X, (X' * invVX) \ (invVX' * m.data.y))
     m
 end
@@ -168,14 +167,6 @@ function vcovvc(m::VCModel)
     any(ismissing.(H)) ? H : inv(0.5 * H)
 end
 
-# covariance of transformed variance components
-# Denne kædder vel med m!? lag en copy.
-# transform(θ::Vector) = θ 
-function vcovvctr(m::VCModel)
-    J = FiniteDiff.finite_difference_jacobian(transform, m.θ)
-    J * vcovvc(m) * J'
-end
-
 function stderror(m::VCModel)
     sqrt.(diag(vcov(m)))
 end
@@ -190,12 +181,12 @@ function fixef!(v::Vector{T}, m::VCModel{T}) where T
 end
 
 function fixef(m::VCModel{T}) where T
-    fixef!(Vector{T}(undef, m.data.dims.p), m)
+    fixef!(zeros(T, m.data.dims.p), m)
 end
 
 # Posterior means for u
 function ranef!(w::Matrix{T}, m::VCModel{T}) where T
-    δ = transform(m.θ)
+    δ = transform(m)
     invVϵ = m.Λ \ (m.data.y - m.μ) # V^-1(y - Xβ) 
     for i in 1:m.data.dims.q
         w[:, i] = δ[i] * m.data.r[i] * invVϵ
@@ -204,7 +195,7 @@ function ranef!(w::Matrix{T}, m::VCModel{T}) where T
 end
 
 function ranef(m::VCModel{T}) where T
-    w = Matrix{T}(undef, m.data.dims.n, m.data.dims.q)
+    w = zeros(T, m.data.dims.n, m.data.dims.q)
     ranef!(w, m)
 end
 
