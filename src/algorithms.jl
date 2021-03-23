@@ -79,7 +79,7 @@ function gradient(m::VCModel)
         L .= invV2P(L, m.data.X)
     end
     tmp_n = zeros(T, n)
-    gradient!(∇, L, invVϵ, tmp_n, m)
+    gradient!(∇, Symmetric(L), invVϵ, tmp_n, m)
 end
 
   # Lynch & Walsh p. 789
@@ -88,7 +88,7 @@ end
   # ML tr(V^-1 * R) - (y - Xβ) * 'V^-1 * R * V^-1 * (y - Xβ)
   # REML tr(P * R) - (y - Xβ)' * V^-1 * R * V^-1 * (y - Xβ)
   # P = V^-1 - Q
-  function gradient!(∇::Vector, L::Matrix, invVϵ::Vector, tmp_n_i::Vector, m::VCModel)
+  function gradient!(∇::Vector, L::AbstractMatrix, invVϵ::Vector, tmp_n_i::Vector, m::VCModel)
     for i ∈ 1:m.data.dims.q
         mul!(tmp_n_i, m.data.r[i], invVϵ)
         ∇[i] = dot(L, m.data.r[i]) - dot(invVϵ, tmp_n_i)
@@ -213,34 +213,3 @@ function jacobian!(J::Matrix, m::VCModel)
     J .= FiniteDiff.finite_difference_jacobian(f, copy(m.θ))
     J
 end
-
-function showvector(io, v::AbstractVector)
-    print(io, "[")
-    for (i, elt) in enumerate(v)
-        i > 1 && print(io, ", ")
-        print(io, elt)
-    end
-    print(io, "]")
-end
-
-function showiter(io, pre::AbstractVector, val::AbstractVector)
-    p = length(pre)
-    for i ∈ 1:p
-        print(io, pre[i])
-        print(io, ": ")
-        if isa(val[i], Vector)
-            showvector(io, val[i])
-        else
-            print(io, val[i])
-        end
-        i < p && print(io, ", ")
-    end
-    println(io)
-end
-
-showiter(p::AbstractVector, v::AbstractVector) = showiter(IOContext(stdout, :compact => true), p, v)
-
-showiter(i::Int, v::Real, θ::Vector, ∇::Vector) = println("iteration: $i, objective: $v, θ: $θ, ∇: $∇")
-showiter(i::Int, θ::Vector, ∇::Vector) = println("iteration: $i, θ: $θ, ∇: $∇")
-showiter(θ::Vector, ∇::Vector) = println("θ: $θ, ∇: $∇")
-showiter(v::Real, θ::Vector) = println("objective: $v, θ: $θ")

@@ -51,6 +51,13 @@ end
     #o
 #end
 
+function update!(o::VCOpt, θ::AbstractVector{T}, val::T) where T<:AbstractFloat
+    o.feval += 1
+    o.xfinal = θ
+    o.ffinal = val
+    o
+end
+
 function NLopt.Opt(o::VCOpt)
     opt = NLopt.Opt(o.optimizer, length(o.xlb))
     NLopt.lower_bounds!(opt, o.xlb)
@@ -94,3 +101,26 @@ function Base.show(io::IO, o::VCOpt)
         println(io, "$name = $val")
     end
 end
+
+
+function showvector(io, v::AbstractVector)
+    print(io, "[")
+    for (i, elt) in enumerate(v)
+        i > 1 && print(io, ", ")
+        print(io, elt)
+    end
+    print(io, "]")
+end
+
+function showiter(io, o::VCOpt)
+    print(io, "iteration: ",o.feval)
+    print(io, ", objective: ", o.ffinal)
+    print(io, ", θ: ", o.xfinal)
+    if !any(ismissing.(o.∇))
+        print(io, ", ∇: ")
+        showvector(io, o.∇)
+    end
+    println(io)
+end
+
+showiter(o::VCOpt) = showiter(IOContext(stdout, :compact => true), o)

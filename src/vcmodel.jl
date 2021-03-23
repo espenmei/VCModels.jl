@@ -31,9 +31,9 @@ end
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
     θ::Vector{T}
-    Λ::Cholesky{T, Matrix{T}} #Λ::Cholesky{T}
+    Λ::Cholesky{T, Matrix{T}}
     μ::Vector{T}
-    opt::VCOpt
+    opt::VCOpt{T}
 end
 
 function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false) where T<:AbstractFloat
@@ -85,34 +85,27 @@ function setθ!(m::VCModel, θ::Vector)
     m
 end
 
-# Only fill the upper triangle
- function scaleUpperTri!(M, δ, R)
-    for i ∈ 1:size(M, 2) #for i ∈ axes(M, 2)
-         for j ∈ 1:i
-            M[j,i] += δ * R[j,i]
-        end
-    end
-    M
-end
-
-function scaleUpperTri!(M, δ, R::Diagonal)
-    for i ∈ 1:size(M, 2)
-        M[i,i] += δ * R[i,i]
-    end
-    M
-end
-
-function updateΛ!(m::VCModel)    
+function updateΛ!(m::VCModel)
     δ = transform(m)
     fill!(m.Λ.factors, zero(eltype(m.θ)))
     for i ∈ 1:m.data.dims.q
         #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
-        scaleUpperTri!(m.Λ.factors, δ[i], m.data.r[i])
+        mul!(m.Λ.factors, δ[i], m.data.r[i])
     end
     # Does the error for non-PD comes from cholesky?
     cholesky!(Symmetric(m.Λ.factors, :U)) # Update the cholesky factorization object (Tar mest tid)
     m
 end
+
+#function updateΛp!(m::VCModel)    
+#    δ = transform(m)
+#    copyto!(m.Λ.factors, I)
+#    for i ∈ 1:m.data.dims.q
+#        scaleUpperTri!(m.Λ.factors, δ[i], m.data.r[i])
+#    end
+#    cholesky!(Symmetric(m.Λ.factors, :U))
+#    m
+#end
 
 # Generalized least squares for β
 # Pawitan p. 440 (X'V^-1X)β = X'V^-1y
@@ -154,7 +147,13 @@ function objective(m::VCModel)
     isreml(m) ? val + rml(m) : val
 end
 
-# Covariance of fixed effects
+#function objectivep(m::VCModel)
+#    n = m.data.dims.n
+#    logdet(m.Λ) + n * (1.0 + log(2π) + log(wrss(m) / n))
+#end
+
+
+# covariance of fixed effects
 function vcov(m::VCModel)
     X = m.data.X
     inv(X' * (m.Λ \ X))
@@ -216,18 +215,17 @@ function fit!(m::VCModel)
     # Det er jo egentlig gjort ett update når modellen ble laget. Men da må du stole på at modellen ikke har blitt klussa med.
     function obj(θ::Vector, g)
         val = objective(update!(m, θ))
-        showiter(val, θ)
+        update!(m.opt, θ, val)
+        showiter(m.opt)
         val
     end
     opt = Opt(m.opt)
     min_objective!(opt, obj)
     minf, minx, ret = optimize!(opt, m.θ)
-    
+    m.opt.ret = ret
     if ret ∈ [:FAILURE, :INVALID_ARGS, :OUT_OF_MEMORY, :FORCED_STOP, :MAXEVAL_REACHED]
         @warn("NLopt optimization failure: $ret")
     end
-    # update the VCOpt object
-    m.opt.feval = opt.numevals
     m
 end
 
