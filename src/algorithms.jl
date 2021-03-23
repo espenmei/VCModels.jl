@@ -13,8 +13,8 @@ function fs!(m::VCModel)
     o = m.opt
     # tmp storage
     tmp_nn_i = zeros(T, n, n)
-    tmp_nn_i2 = copy(tmp_nn_i)
     tmp_n_i = zeros(T, n)
+    P = copy(tmp_nn_i) # V^-1 for ml, P for reml
     
     while true 
         o.feval += 1
@@ -22,23 +22,55 @@ function fs!(m::VCModel)
         copyto!(o.xinitial, o.xfinal)
         o.finitial = o.ffinal
         
-        copyto!(tmp_nn_i2 ,inv(m.Λ)) # expensive
-        mul!(tmp_n_i, tmp_nn_i2, m.data.y - m.μ) # cheap
+        copyto!(P, inv(m.Λ)) # expensive
+        mul!(tmp_n_i, P, m.data.y - m.μ) # cheap
         if isreml(m)
-            tmp_nn_i2 .= invV2P(tmp_nn_i2, m.data.X) # cheap
+            P .= invV2P(P, m.data.X) # cheap
         end
-        expectedinfo!(o.H, o.∇, tmp_nn_i2, tmp_n_i, tmp_nn_i, m) # expensive
+        #tmp_nn_i2 .= Symmetric(tmp_nn_i2)
+        expectedinfo!(o.H, o.∇, P, tmp_n_i, tmp_nn_i, m) # expensive
         # Check bounds before update
         copyto!(o.xfinal, o.xinitial - o.H \ o.∇)
         update!(m, o.xfinal)
         o.ffinal = objective(m)
-        showiter(["iteration", "θ", "∇"], [o.feval, m.θ, o.∇])
+        showiter(m.opt)
 
         if converged(m.opt)
             break
         end
     end
     m
+end
+
+function expectedinfo(m::VCModel)
+    n, _, q = m.data.dims
+    T = eltype(m.θ)
+    H = zeros(T, q, q)
+    ∇ = zeros(T, q)
+    L = inv(m.Λ)
+    invVϵ = L * (m.data.y - m.μ)
+    if isreml(m)
+        L .= invV2P(L, m.data.X)
+    end
+    tmp_nn = zeros(T, n, n)
+    expectedinfo!(H, ∇, L, invVϵ, tmp_nn, m)
+end
+
+# Lynch & Walsh p. 789, # Undersøk denne med flere vc
+function expectedinfo!(H::Matrix, ∇::Vector, L::Matrix, invVϵ::Vector, tmp_nn_i::Matrix, m::VCModel)
+    for i ∈ 1:m.data.dims.q
+        mul!(tmp_nn_i, L, m.data.r[i])
+        for j ∈ 1:i
+            if j == i
+                H[i,j] = sum(abs2, tmp_nn_i)
+                ∇[i] = tr(tmp_nn_i) - dot(invVϵ, m.data.r[i] * invVϵ)
+            else
+                H[i,j] = H[j,i] = dot(tmp_nn_i, L * m.data.r[j])
+            end
+        end
+    end
+    #Symmetric(H, :L), ∇
+    H, ∇
 end
 
 function em!(m::VCModel, iter=100)
@@ -94,93 +126,6 @@ end
         ∇[i] = dot(L, m.data.r[i]) - dot(invVϵ, tmp_n_i)
     end
     ∇
-end
-
-function averageinfo(m::VCModel)
-    q = m.data.dims.q
-    averageinfo!(Matrix{eltype(m.θ)}(undef, q, q), m)
-end
-
-function averageinfo!(H::Matrix, m::VCModel)    
-    n, _, q = m.data.dims
-    y = m.data.y
-    tmp_nn_i = Matrix{eltype(m.θ)}(undef, n, n)
-    L = inv(m.Λ)
-    invVr = L * (y - m.μ) # må defineres før if statement
-    if m.reml
-      L .= invV2P(L, m.data.X)
-    end
-    for i ∈ 1:q
-        mul!(tmp_nn_i, L, m.data.r[i])
-        for j ∈ 1:i
-            if j == i
-                H[i,j] = invVr' * tmp_nn_i * m.data.r[i] * invVr
-            else
-                H[i,j] = invVr' * tmp_nn_i * m.data.r[j] * invVr
-            end
-        end
-    end
-    Symmetric(H, :L)
-end
-
-function observedinfo(m::VCModel)
-    q = m.data.dims.q
-    observedinfo!(Matrix{eltype(m.θ)}(undef, q, q), m)
-end
-
-# Parameter estimation and inference in the linear mixed model - F.N. Gumedze ∗, T.T. Dunne
-function observedinfo!(H::Matrix, m::VCModel)    
-    n, _, q = m.data.dims
-    y = m.data.y
-    T = eltype(m.θ)
-    tmp_nn_i = Matrix{T}(undef, n, n)
-    L = inv(m.Λ)
-    invVr = L * (y - m.μ) # må defineres før if statement
-    if m.reml
-        L .= invV2P(L, m.data.X)
-    end
-    for i ∈ 1:q
-        mul!(tmp_nn_i, L, m.data.r[i])
-        for j ∈ 1:i
-            if j == i
-                H[i,j] = -sum(abs2, tmp_nn_i) + T(2) * invVr' * m.data.r[i] * tmp_nn_i * invVr
-            else
-                H[i,j] = -dot(tmp_nn_i, L * m.data.r[j]) + T(2) * invVr' * tmp_nn_i * m.data.r[j] * invVr
-            end
-        end
-    end
-    Symmetric(H, :L)
-end
-
-function expectedinfo(m::VCModel)
-    n, _, q = m.data.dims
-    T = eltype(m.θ)
-    H = zeros(T, q, q)
-    ∇ = zeros(T, q)
-    L = inv(m.Λ)
-    invVϵ = L * (m.data.y - m.μ)
-    if isreml(m)
-        L .= invV2P(L, m.data.X)
-    end
-    tmp_nn = zeros(T, n, n)
-    expectedinfo!(H, ∇, L, invVϵ, tmp_nn, m)
-end
-
-# Lynch & Walsh p. 789, # Undersøk denne med flere vc
-function expectedinfo!(H::Matrix, ∇::Vector, L::Matrix, invVϵ::Vector, tmp_nn_i::Matrix, m::VCModel)
-    for i ∈ 1:m.data.dims.q
-        mul!(tmp_nn_i, L, m.data.r[i])
-        for j ∈ 1:i
-            if j == i
-                H[i,j] = sum(abs2, tmp_nn_i)
-                ∇[i] = tr(tmp_nn_i) - dot(invVϵ, m.data.r[i] * invVϵ)
-            else
-                H[i,j] = H[j,i] = dot(tmp_nn_i, L * m.data.r[j])
-            end
-        end
-    end
-    #Symmetric(H, :L), ∇
-    H, ∇
 end
 
 function hessian(m::VCModel)
