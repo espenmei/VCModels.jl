@@ -8,6 +8,7 @@ using StatsBase
 using StatsModels
 using DataFrames: DataFrame
 using FiniteDiff
+using JLD
 
 import StatsBase: fit, fit! # Can now call fit, fit! directly
 #import NLopt: Opt # overwrites
@@ -26,10 +27,12 @@ export
     objective,
     fit,
     fit!,
-    gradient,
-    gradient!,
+    #gradient,
+    #gradient!,
     hessian,
     hessian!,
+    jacobian,
+    jacobian!,
    # fisherinfo!,
     transform,
     # Utilities
@@ -58,5 +61,6 @@ include("optimization.jl")
 include("vcmodel.jl")
 include("algorithms.jl")
 include("linalg.jl")
+include("fileIO.jl")
 
 end # module

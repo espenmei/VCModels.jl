@@ -42,15 +42,6 @@ function VCOpt(optimizer::Symbol, xinitial::Vector{T}, xlb::Vector{T}, reml::Boo
     )
 end
 
-# lag dennee så den kan kjøres hver iterasjon
-#function update!(o::VCOpt, xinitial::Vector, finitial::T) where T<:AbstractFloat
-    #o.xinitial = x.initial
-    #o.finitial = finitial
-    #o.xfinal = o.xinitial
-    #o.dfinal = o.dinitial
-    #o
-#end
-
 function update!(o::VCOpt, θ::AbstractVector{T}, val::T) where T<:AbstractFloat
     o.feval += 1
     o.xfinal = θ
@@ -74,9 +65,9 @@ function converged(o::VCOpt)
     f_abs = abs(o.ffinal - o.finitial)
     x_abs = abs.(o.xfinal - o.xinitial)
     
-    if f_abs < o.ftol_abs
+    if f_abs < o.ftol_abs ||  f_abs < o.ftol_rel * o.ffinal
         o.ret = :FTOL_REACHED
-    elseif all(x_abs .< o.xtol_abs)
+    elseif all(x_abs .< o.xtol_abs) || x_abs < o.xtol_rel * o.xfinal
         o.ret = :XTOL_REACHED
     elseif o.maxfeval >= 0 && o.feval >= o.maxfeval
         o.ret = :MAXEVAL_REACHED
@@ -101,7 +92,6 @@ function Base.show(io::IO, o::VCOpt)
         println(io, "$name = $val")
     end
 end
-
 
 function showvector(io, v::AbstractVector)
     print(io, "[")

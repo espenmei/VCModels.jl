@@ -16,10 +16,10 @@ function fs!(m::VCModel)
     tmp_n_i = zeros(T, n)
     P = copy(tmp_nn_i) # V^-1 for ml, P for reml
     
-    while true 
+    while true
         o.feval += 1
         # initial values takes the last values
-        copyto!(o.xinitial, o.xfinal)
+        o.xinitial .= o.xfinal
         o.finitial = o.ffinal
         
         copyto!(P, inv(m.Λ)) # expensive
@@ -27,11 +27,9 @@ function fs!(m::VCModel)
         if isreml(m)
             P .= invV2P(P, m.data.X) # cheap
         end
-        #tmp_nn_i2 .= Symmetric(tmp_nn_i2)
-        expectedinfo!(o.H, o.∇, P, tmp_n_i, tmp_nn_i, m) # expensive
-        # Check bounds before update
-        copyto!(o.xfinal, o.xinitial - o.H \ o.∇)
-        update!(m, o.xfinal)
+        expectedinfo!(m, P, tmp_n_i, tmp_nn_i) # expensive
+        o.xfinal .= o.xinitial - o.H \ o.∇
+        update!(m, o.xfinal) # Check bounds before update
         o.ffinal = objective(m)
         showiter(m.opt)
 
@@ -42,35 +40,32 @@ function fs!(m::VCModel)
     m
 end
 
-function expectedinfo(m::VCModel)
+function expectedinfo!(m::VCModel)
     n, _, q = m.data.dims
     T = eltype(m.θ)
-    H = zeros(T, q, q)
-    ∇ = zeros(T, q)
     L = inv(m.Λ)
     invVϵ = L * (m.data.y - m.μ)
     if isreml(m)
         L .= invV2P(L, m.data.X)
     end
     tmp_nn = zeros(T, n, n)
-    expectedinfo!(H, ∇, L, invVϵ, tmp_nn, m)
+    expectedinfo!(m, L, invVϵ, tmp_nn)
 end
 
 # Lynch & Walsh p. 789, # Undersøk denne med flere vc
-function expectedinfo!(H::Matrix, ∇::Vector, L::Matrix, invVϵ::Vector, tmp_nn_i::Matrix, m::VCModel)
+function expectedinfo!(m::VCModel, L::AbstractMatrix, invVϵ::Vector, tmp_nn_i::Matrix)
     for i ∈ 1:m.data.dims.q
         mul!(tmp_nn_i, L, m.data.r[i])
         for j ∈ 1:i
             if j == i
-                H[i,j] = sum(abs2, tmp_nn_i)
-                ∇[i] = tr(tmp_nn_i) - dot(invVϵ, m.data.r[i] * invVϵ)
+                m.opt.H[i,j] = sum(abs2, tmp_nn_i)
+                m.opt.∇[i] = tr(tmp_nn_i) - dot(invVϵ, m.data.r[i] * invVϵ)
             else
-                H[i,j] = H[j,i] = dot(tmp_nn_i, L * m.data.r[j])
+                m.opt.H[i,j] = m.opt.H[j,i] = dot(tmp_nn_i, L * m.data.r[j])
             end
         end
     end
-    #Symmetric(H, :L), ∇
-    H, ∇
+    m
 end
 
 function em!(m::VCModel, iter=100)
@@ -136,7 +131,7 @@ end
 function hessian!(H::Matrix, m::VCModel)
     function obj(x::Vector)
         val = objective(update!(m_tmp, x))
-        showiter(val, x)
+        #showiter(val, x)
         val
     end
     m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
@@ -156,5 +151,7 @@ function jacobian!(J::Matrix, m::VCModel)
     end
     m_tmp = deepcopy(m)
     J .= FiniteDiff.finite_difference_jacobian(f, copy(m.θ))
+    #FiniteDiff.finite_difference_jacobian!(J, f, copy(m.θ))
     J
+    
 end
