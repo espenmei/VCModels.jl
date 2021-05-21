@@ -21,6 +21,18 @@ git-tree-sha1 = "9e62e66db34540a0c919d72172cc2f642ac71260"
 uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 version = "0.5.0"
 
+[[Blosc]]
+deps = ["Blosc_jll"]
+git-tree-sha1 = "84cf7d0f8fd46ca6f1b3e0305b4b4a37afe50fd6"
+uuid = "a74b3585-a348-5f62-a45c-50e91977d574"
+version = "0.7.0"
+
+[[Blosc_jll]]
+deps = ["Libdl", "Lz4_jll", "Pkg", "Zlib_jll", "Zstd_jll"]
+git-tree-sha1 = "aa9ef39b54a168c3df1b2911e7797e4feee50fbe"
+uuid = "0b7ba130-8d10-5ba8-a3d6-c5182647fed9"
+version = "1.14.3+1"
+
 [[Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "c3598e525718abcc440f69cc6d5f60dda0a1b61e"
@@ -110,6 +122,12 @@ version = "0.24.15"
 deps = ["ArgTools", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 
+[[FileIO]]
+deps = ["Pkg", "Requires", "UUIDs"]
+git-tree-sha1 = "cfb694feaddf4f0381ef3cc9d4c0d8fc6b7e2ea7"
+uuid = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+version = "1.9.0"
+
 [[FillArrays]]
 deps = ["LinearAlgebra", "Random", "SparseArrays"]
 git-tree-sha1 = "31939159aeb8ffad1d4d8ee44d07f8558273120a"
@@ -131,6 +149,18 @@ version = "0.4.2"
 [[Future]]
 deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
+
+[[HDF5]]
+deps = ["Blosc", "Compat", "HDF5_jll", "Libdl", "Mmap", "Random", "Requires"]
+git-tree-sha1 = "1d18a48a037b14052ca462ea9d05dee3ac607d23"
+uuid = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+version = "0.15.5"
+
+[[HDF5_jll]]
+deps = ["Artifacts", "JLLWrappers", "LibCURL_jll", "Libdl", "OpenSSL_jll", "Pkg", "Zlib_jll"]
+git-tree-sha1 = "fd83fa0bde42e01952757f01149dd968c06c4dba"
+uuid = "0234f1f7-429e-5d53-9886-15a909be8d59"
+version = "1.12.0+1"
 
 [[HTTP]]
 deps = ["Base64", "Dates", "IniFile", "MbedTLS", "NetworkOptions", "Sockets", "URIs"]
@@ -163,6 +193,12 @@ version = "1.0.0"
 git-tree-sha1 = "a3f24677c21f5bbe9d2a714f95dcd58337fb2856"
 uuid = "82899510-4779-5014-852e-03e436cf321d"
 version = "1.0.0"
+
+[[JLD]]
+deps = ["FileIO", "HDF5", "Printf"]
+git-tree-sha1 = "1d291ba1730de859903b480e6f85a0dc40c19dcb"
+uuid = "4138dd39-2aa7-5051-a626-17a0bb65d9c8"
+version = "0.12.3"
 
 [[JLLWrappers]]
 git-tree-sha1 = "a431f5f2ca3f4feef3bd7a5e94b8b8d4f2f647a0"
@@ -206,6 +242,12 @@ uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
 [[Logging]]
 uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
+
+[[Lz4_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "5d494bc6e85c4c9b626ee0cab05daa4085486ab1"
+uuid = "5ced341a-0733-55b8-9ab6-a4889d929147"
+version = "1.9.3+0"
 
 [[Markdown]]
 deps = ["Base64"]
@@ -265,6 +307,12 @@ version = "2.7.0+0"
 
 [[NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
+
+[[OpenSSL_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "71bbbc616a1d710879f5a1021bcba65ffba6ce58"
+uuid = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
+version = "1.1.1+6"
 
 [[OpenSpecFun_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Pkg"]
@@ -475,6 +523,12 @@ version = "0.9.3"
 [[Zlib_jll]]
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
+
+[[Zstd_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "cc4bf3fdde8b7e3e9fa0351bdeedba1cf3b7f6e6"
+uuid = "3161d3a3-bdf6-5164-811a-617609db77b4"
+version = "1.5.0+0"
 
 [[nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
