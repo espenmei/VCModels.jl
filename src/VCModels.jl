@@ -12,7 +12,7 @@ using JLD
 
 import StatsBase: fit, fit! # Can now call fit, fit! directly
 #import NLopt: Opt # overwrites
-import LinearAlgebra: dot, mul!
+import LinearAlgebra: dot, mul!, logabsdet
 
 export
     # Structs/constructors 

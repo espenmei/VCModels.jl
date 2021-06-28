@@ -140,10 +140,9 @@ function rml(m::VCModel)
 end
 
 # Negative twice normal log-likelihood
-# Is the constant right for reml?
-# I think the error for non-PD comes from logdet(m.Λ)
 function objective(m::VCModel)
-    val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
+    #val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
+    val = log(2π) * dfresidual(m) + logabsdet(m) + wrss(m)
     isreml(m) ? val + rml(m) : val
 end
 
