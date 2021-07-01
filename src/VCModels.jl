@@ -1,18 +1,17 @@
 module VCModels
 
-using NLopt
-using LinearAlgebra
 using Base: Ryu
-using Distributions
-using StatsBase
-using StatsModels
 using DataFrames: DataFrame
+using Distributions
 using FiniteDiff
 using JLD
+using LinearAlgebra
+using NLopt
+using StatsBase
+using StatsModels
 
 import StatsBase: fit, fit! # Can now call fit, fit! directly
-#import NLopt: Opt # overwrites
-import LinearAlgebra: dot, mul!, logabsdet
+import LinearAlgebra: dot, logabsdet
 
 export
     # Structs/constructors 

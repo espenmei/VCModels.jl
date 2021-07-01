@@ -1,10 +1,10 @@
 """
-`VCData` holds observed input data of a variance component model
+`VCData` holds input data of a variance component model
 # Fields
 - `y`: 'n' vector of responses
 - `X`: 'n × p' matrix of covariates
 - `r`: 'q' vector of 'n × n' correlation matrices
-- `dims`: tuple of n = length of y, p = columns of X, q = length of r
+- `dims`: tuple of n = dimension of y, p = columns of X, q = dimension of r
 """
 struct VCData{T<:AbstractFloat}
     y::Vector{T}
@@ -62,16 +62,15 @@ function VCModel(d::VCData, θ_lb::Vector{<:AbstractFloat},  reml::Bool = false)
     )
 end
 
-isreml(m::VCModel) = m.opt.reml
-
 function initialvalues(d::VCData)
     n, _, q = d.dims
-    X = d.X
-    y = d.y
+    X, y = d.X, d.y
     β = X \ y
     msse = sum(abs2, y - X * β) / n
     fill(msse / q, q)
 end
+
+isreml(m::VCModel) = m.opt.reml
 
 transform(m::StatisticalModel) = m.θ
 
@@ -87,10 +86,9 @@ end
 
 function updateΛ!(m::VCModel)
     δ = transform(m)
-    fill!(m.Λ.factors, zero(eltype(m.θ)))
+    fill!(m.Λ.factors, zero(eltype(δ)))
     for i ∈ 1:m.data.dims.q
-        #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
-        mul!(m.Λ.factors, δ[i], m.data.r[i])
+        muladduppertri!(m.Λ.factors, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
     # Does the error for non-PD comes from cholesky?
     cholesky!(Symmetric(m.Λ.factors, :U)) # Update the cholesky factorization object (Tar mest tid)

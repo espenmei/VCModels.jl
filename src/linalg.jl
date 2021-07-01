@@ -1,18 +1,17 @@
 
 # Only fill the upper triangle
-# call this muladd! or something
-function LinearAlgebra.mul!(C::Matrix{T}, a::T, B::Symmetric{T, Matrix{T}}) where {T<:AbstractFloat}
+function muladduppertri!(C::Matrix{T}, α::Number, B::Symmetric{T, Matrix{T}}) where {T<:AbstractFloat}
     for i ∈ 1:size(C, 2)
         for j ∈ 1:i
-           C[j,i] += a * B[j,i]
+           C[j,i] += α * B[j,i]
        end
    end
-   C # Symmetric(C, :U)
+   C #Symmetric(C, :U)
 end
 
-function LinearAlgebra.mul!(C::Matrix{T}, a::T, B::Diagonal{T, Vector{T}}) where {T<:AbstractFloat}
+function muladduppertri!(C::Matrix{T}, α::Number, B::Diagonal{T, Vector{T}}) where {T<:AbstractFloat}
     for i ∈ 1:size(C, 2)
-        C[i,i] += a * B[i,i]
+        C[i,i] += α * B[i,i]
     end
     C
 end
@@ -25,6 +24,7 @@ function LinearAlgebra.dot(A::Diagonal{T, Vector{T}}, B::Symmetric{T}) where {T<
     dot(Symmetric(A), B)
 end
 
+# This should not be necessary - The cov matrix should be pd
 function LinearAlgebra.logabsdet(m::VCModel)
     ld = zero(eltype(m.Λ))
     @inbounds for i ∈ diagind(m.Λ.factors)
