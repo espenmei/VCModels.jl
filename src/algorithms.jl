@@ -131,7 +131,7 @@ end
 function hessian!(H::Matrix, m::VCModel)
     function obj(x::Vector)
         val = objective(update!(m_tmp, x))
-        #showiter(val, x)
+        #showiter(m_tmp.opt)
         val
     end
     m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
