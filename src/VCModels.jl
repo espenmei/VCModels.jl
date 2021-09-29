@@ -10,6 +10,7 @@ using NLopt
 using StatsBase
 using StatsModels
 
+# Things to override
 import StatsBase: fit, fit! # Can now call fit, fit! directly
 import LinearAlgebra: dot, logabsdet
 

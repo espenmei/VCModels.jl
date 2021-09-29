@@ -266,10 +266,10 @@ StatsBase.response(m::VCModel) = m.data.y
 # StatsModels
 # Check that both are reml or ml. For reml X == X must hold.
 function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
-    criterion = m1.reml == m2.reml
+    criterion = m1.opt.reml == m2.opt.reml
     fterms = issubset(m1.data.X, m2.data.X)
     rterms = issubset(m1.data.r, m2.data.r)
-    if m1.reml == true && m2.reml == true
+    if m1.opt.reml && m2.opt.reml
         fterms = m1.data.X == m2.data.X
     end
     criterion && fterms && rterms
