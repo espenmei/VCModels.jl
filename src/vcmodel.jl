@@ -265,15 +265,16 @@ StatsBase.response(m::VCModel) = m.data.y
 
 # StatsModels
 # Check that both are reml or ml. For reml X == X must hold.
-function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
-    criterion = m1.opt.reml == m2.opt.reml
-    fterms = issubset(m1.data.X, m2.data.X)
-    rterms = issubset(m1.data.r, m2.data.r)
-    if m1.opt.reml && m2.opt.reml
-        fterms = m1.data.X == m2.data.X
-    end
-    criterion && fterms && rterms
-end
+#function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
+#    response = m1.data.y == m2.data.y
+#    criterion = m1.opt.reml == m2.opt.reml
+#    rterms = issubset(m1.data.r, m2.data.r)
+#    fterms = issubset(m1.data.X, m2.data.X)
+#    if m1.opt.reml && m2.opt.reml
+#        fterms = m1.data.X == m2.data.X
+#    end
+#    response && criterion && fterms && rterms
+#end
 
 # Base
 function Base.show(io::IO, m::VCModel)

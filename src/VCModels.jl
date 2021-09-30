@@ -54,7 +54,7 @@ export
     modelmatrix,
     nobs,
     response,
-    isnested
+    #isnested
 
 # Order matters!
 include("optimization.jl")
