@@ -1,6 +1,7 @@
 .vscode/
 text/
 div/
+src/algorithms.jl
 init.jl
 init_trio.jl
 notes.jl

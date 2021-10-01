@@ -59,7 +59,8 @@ export
 # Order matters!
 include("optimization.jl")
 include("vcmodel.jl")
-include("algorithms.jl")
+#include("algorithms.jl")
+include("calc.jl")
 include("linalg.jl")
 include("fileIO.jl")
 
