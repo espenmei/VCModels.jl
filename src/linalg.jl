@@ -1,16 +1,17 @@
 
 # Only fill the upper triangle
 # use T1 and T2 so that C may be of different type than B
-function muladduppertri!(C::Matrix{T}, α::Number, B::Symmetric{T, Matrix{T}}) where {T<:AbstractFloat}
-    for i ∈ 1:size(C, 2)
-        for j ∈ 1:i
-           C[j,i] += α * B[j,i]
-       end
-   end
-   C #Symmetric(C, :U)
-end
+#function muladduppertri!(C::Matrix{T}, α::Number, B::Symmetric{T, Matrix{T}}) where {T<:AbstractFloat}
+#    for i ∈ 1:size(C, 2)
+#        for j ∈ 1:i
+#           C[j,i] += α * B[j,i]
+#       end
+#   end
+#   C #Symmetric(C, :U)
+#end
 
-function muladduppertri!(C::Matrix{T1}, α::Number, B::Symmetric{T2, Matrix{T2}}) where {T1<:AbstractFloat, T2<:AbstractFloat}
+#function muladduppertri!(C::Matrix{T1}, α::Number, B::Symmetric{T2, Matrix{T2}}) where {T1<:AbstractFloat, T2<:AbstractFloat}
+function muladduppertri!(C::Matrix, α::Number, B::Symmetric)
     for i ∈ 1:size(C, 2)
         for j ∈ 1:i
            C[j,i] += α * B[j,i]

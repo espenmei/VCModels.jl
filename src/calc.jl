@@ -14,6 +14,7 @@ function hessian!(H::Matrix, m::VCModel)
     H
 end
 
+# Dette er latterlig. Krev heller at transform tar en vector så slipper du å lage en kopi av hele modellen
 function jacobian(m::VCModel)
     q = m.data.dims.q
     jacobian!(zeros(eltype(m.θ), q, q), m)
@@ -28,5 +29,4 @@ function jacobian!(J::Matrix, m::VCModel)
     J .= FiniteDiff.finite_difference_jacobian(f, copy(m.θ))
     #FiniteDiff.finite_difference_jacobian!(J, f, copy(m.θ))
     J
-    
 end

@@ -6,17 +6,26 @@
 - `r`: 'q' vector of 'n × n' correlation matrices
 - `dims`: tuple of n = dimension of y, p = columns of X, q = dimension of r
 """
-struct VCData{T<:AbstractFloat}
+#struct VCData{T<:AbstractFloat, M, T2<:AbstractMatrix} 
+#    y::Vector{T}
+#    X::Matrix{T}
+#    r::NTuple{M, T2}
+#    dims::NamedTuple{(:n, :p, :q), NTuple{3, Int}}
+#end
+
+struct VCData{T<:AbstractFloat} 
     y::Vector{T}
     X::Matrix{T}
-    r::Vector{<:AbstractMatrix} # Vector{<:AbstractMatrix{T}} Doesn't allow Float32 for A # Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse?
+    r::Vector{<:AbstractMatrix} # Vector{<:AbstractMatrix{T}} Doesn't allow Float32 for A. Now it is not typestable. Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse? Change to tuple
     dims::NamedTuple{(:n, :p, :q), NTuple{3, Int}}
 end
 
 function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where T<:AbstractFloat
+#function VCData(y::Vector{T}, X::VecOrMat{T}, r::NTuple{M, AbstractMatrix}) where {T<:AbstractFloat, M}
     X = reshape(X, :, size(X, 2)) # Make sure X is a matrix
     dims = (n = size(X, 1), p = size(X, 2), q = length(r))
     VCData(y, X, r, dims)
+    #VCData{T, M, eltype(r)}(y, X, r, dims)
 end
 
 """
@@ -74,6 +83,8 @@ isreml(m::VCModel) = m.opt.reml
 
 transform(m::StatisticalModel) = m.θ
 
+transform(θ::Vector) = θ
+
 function update!(m::VCModel, θ::Vector)
     updateμ!(updateΛ!(setθ!(m, θ)))
     m
@@ -86,12 +97,13 @@ end
 
 function updateΛ!(m::VCModel)
     δ = transform(m)
-    fill!(m.Λ.factors, zero(eltype(δ)))
+    Λfac = m.Λ.factors 
+    fill!(Λfac, zero(eltype(δ)))
     for i ∈ 1:m.data.dims.q
-        muladduppertri!(m.Λ.factors, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
+        muladduppertri!(Λfac, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
-    # Does the error for non-PD comes from cholesky?
-    cholesky!(Symmetric(m.Λ.factors, :U)) # Update the cholesky factorization object (Tar mest tid)
+    cholesky!(Symmetric(Λfac, :U), check = false) # Update the cholesky factorization object (Tar mest tid)
+    # Can be harder to debug withut check
     m
 end
 
@@ -282,35 +294,30 @@ function Base.show(io::IO, m::VCModel)
         @warn("This model has not been fitted.")
         return nothing
     end
+    # Fit measures
     oo = objective(m)
-    nums = Ryu.writefixed.([-0.5 * oo, oo, aic(m), aicc(m), bic(m)], 4)
-    cols = ["logLik", "-2 logLik", "AIC", "AICc", "BIC"]
-    fieldwd = max(maximum(textwidth.(nums)) + 1, 11)
-    for i in cols
+    oovals = Ryu.writefixed.([-0.5 * oo, oo, aic(m), aicc(m), bic(m)], 4)
+    fieldwd = max(maximum(textwidth.(oovals)) + 1, 11)
+    for i ∈ ["logLik", "-2 logLik", "AIC", "AICc", "BIC"]
         print(io, rpad(i, fieldwd))
     end
     println(io)
-    for i in nums
+    for i ∈ oovals
         print(io, rpad(i, fieldwd))
     end
-    println(io)
-    println(io)
-    println(io, " Variance component parameters:")
-
-    numsvc = Ryu.writefixed.(m.θ, 4)
+    # Variance components
+    println(io, "\n\n Variance component parameters:")
+    vcvals = Ryu.writefixed.(m.θ, 4)
     vcse = stderrorvc(m)
-    numsvcse = fill('-', length(vcse))
-    if !any(ismissing.(vcse))
-        numsvcse = Ryu.writefixed.(vcse, 4)
-    end
-    for label in ["Comp.", "Est.", "Std. Error"]
-        print(io, label, "\t")
+    vcsevals = any(ismissing.(vcse)) ? fill('-', length(vcse)) : Ryu.writefixed.(vcse, 4)
+    for i ∈ ["Comp.", "Est.", "Std. Error"]
+        print(io, i, "\t")
     end
     println(io)
-    for i in 1:length(numsvc)
-        print(io, "θ" * Char(0x2080 + i), "\t", numsvc[i], "\t", numsvcse[i], "\n")
+    for i ∈ 1:length(vcvals)
+        print(io, "θ" * Char(0x2080 + i), "\t", vcvals[i], "\t", vcsevals[i], "\n")
     end
-    println(io)
-    println(io, " Fixed-effects parameters:")
+    # Fixed effects
+    println(io, "\n Fixed-effects parameters:")
     show(io, coeftable(m))
 end
