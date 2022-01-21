@@ -6,13 +6,6 @@
 - `r`: 'q' vector of 'n × n' correlation matrices
 - `dims`: tuple of n = dimension of y, p = columns of X, q = dimension of r
 """
-#struct VCData{T<:AbstractFloat, M, T2<:AbstractMatrix} 
-#    y::Vector{T}
-#    X::Matrix{T}
-#    r::NTuple{M, T2}
-#    dims::NamedTuple{(:n, :p, :q), NTuple{3, Int}}
-#end
-
 struct VCData{T<:AbstractFloat} 
     y::Vector{T}
     X::Matrix{T}
@@ -21,20 +14,19 @@ struct VCData{T<:AbstractFloat}
 end
 
 function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where T<:AbstractFloat
-#function VCData(y::Vector{T}, X::VecOrMat{T}, r::NTuple{M, AbstractMatrix}) where {T<:AbstractFloat, M}
     X = reshape(X, :, size(X, 2)) # Make sure X is a matrix
-    dims = (n = size(X, 1), p = size(X, 2), q = length(r))
+    n, p = size(X)
+    dims = (n = n, p = p, q = length(r))
     VCData(y, X, r, dims)
-    #VCData{T, M, eltype(r)}(y, X, r, dims)
 end
 
 """
 `VCModel` holds data, parameters and optimization info of a variance component model
 # Fields
 - `data`: VCData
-- `θ`: vector of scalar variance component parameters
-- `Λ`: cholesky factorization of the model implied covariance matrix
-- `μ`: vector of model implied means
+- `θ`: 'q' vector of scalar variance component parameters
+- `Λ`: cholesky factorization of the 'n × n' model implied covariance matrix
+- `μ`: 'n' vector of model implied means
 - `opt`: VCOpt with optimization info
 """
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
@@ -54,8 +46,7 @@ function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false
         zeros(T, n),
         VCOpt(:LN_BOBYQA, copy(θ), θ_lb, reml)
         )
-    # Gjør et update her?
-    update!(m, m.θ)
+    update!(m, m.θ) # Gjør et update her?
     m.opt.finitial = objective(m)
     copyto!(m.opt.xfinal, m.opt.xinitial)
     m.opt.ffinal = m.opt.finitial
@@ -119,6 +110,7 @@ end
 
 # Generalized least squares for β
 # Pawitan p. 440 (X'V^-1X)β = X'V^-1y
+# Allocates
 function updateμ!(m::VCModel)
     X = m.data.X
     invVX = m.Λ \ X # V^-1X # allocations
@@ -149,9 +141,8 @@ function rml(m::VCModel)
     logdet(X' * (m.Λ \ X))
 end
 
-# Negative twice normal log-likelihood
+# -2 × log-likelihood
 function objective(m::VCModel)
-    #val = log(2π) * dfresidual(m) + logdet(m.Λ) + wrss(m)
     val = log(2π) * dfresidual(m) + logabsdet(m) + wrss(m)
     isreml(m) ? val + rml(m) : val
 end
@@ -161,8 +152,8 @@ end
 #    logdet(m.Λ) + n * (1.0 + log(2π) + log(wrss(m) / n))
 #end
 
-
 # covariance of fixed effects
+# Same as reml so make one X' * (m.Λ \ X) function 
 function vcov(m::VCModel)
     X = m.data.X
     inv(X' * (m.Λ \ X))
