@@ -1,6 +1,6 @@
 function hessian(m::VCModel)
     q = m.data.dims.q
-    hessian!(Matrix{eltype(m.θ)}(undef, q, q), m)
+    hessian!(zeros(eltype(m.θ), q, q), m)
 end
 
 function hessian!(H::Matrix, m::VCModel)
@@ -10,23 +10,29 @@ function hessian!(H::Matrix, m::VCModel)
         val
     end
     m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
+    # Det er mulig FD har en funksjon som ikke overskriver
     FiniteDiff.finite_difference_hessian!(H, obj, copy(m.θ))
     H
 end
 
-# Dette er latterlig. Krev heller at transform tar en vector så slipper du å lage en kopi av hele modellen
 function jacobian(m::VCModel)
-    q = m.data.dims.q
-    jacobian!(zeros(eltype(m.θ), q, q), m)
+    FiniteDiff.finite_difference_jacobian(transform, copy(m.θ))
 end
 
-function jacobian!(J::Matrix, m::VCModel)
-    function f(θ::Vector)
-        update!(m_tmp, θ)
-        transform(m_tmp)
-    end
-    m_tmp = deepcopy(m)
-    J .= FiniteDiff.finite_difference_jacobian(f, copy(m.θ))
-    #FiniteDiff.finite_difference_jacobian!(J, f, copy(m.θ))
-    J
-end
+# Dette er latterlig. Krev heller at transform tar en vector så slipper du å lage en kopi av hele modellen
+# Det er ikke alltid at L vil være q x q, feks ved sum av paremetere.
+#function jacobian(m::VCModel)
+#    q = m.data.dims.q
+#    jacobian!(zeros(eltype(m.θ), q, q), m)
+#end
+
+#function jacobian!(J::Matrix, m::VCModel)
+#    function f(θ::Vector)
+#        update!(m_tmp, θ)
+#        transform(m_tmp)
+#    end
+#    m_tmp = deepcopy(m)
+#    J .= FiniteDiff.finite_difference_jacobian(f, copy(m.θ))
+#    #FiniteDiff.finite_difference_jacobian!(J, f, copy(m.θ))
+#    J
+#end

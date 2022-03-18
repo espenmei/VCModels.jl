@@ -1,10 +1,22 @@
-function muladduppertri!(C::Matrix, α::Number, B::Symmetric)
+# Requiring B::Symmetric is faster for some reason
+#function muladduppertri!(C::Matrix{T}, α::Number, B::Symmetric{T, Matrix{T}}) where {T<:AbstractFloat}
+#    println("Sym")
+#    for i ∈ 1:size(C, 2)
+#        for j ∈ 1:i
+#           C[j,i] += α * B[j,i]
+#       end
+#   end
+#   C
+#end
+
+# Symmetric Tag slows this down. Is it the indexing?
+function muladduppertri!(C::AbstractMatrix{T}, α::Number, B::AbstractMatrix{T}) where {T<:AbstractFloat}
     for i ∈ 1:size(C, 2)
         for j ∈ 1:i
            C[j,i] += α * B[j,i]
        end
    end
-   C #Symmetric(C, :U)
+   C
 end
 
 function muladduppertri!(C::Matrix{T}, α::Number, B::Diagonal{T, Vector{T}}) where {T<:AbstractFloat}

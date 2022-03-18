@@ -29,22 +29,35 @@ end
 - `μ`: 'n' vector of model implied means
 - `opt`: VCOpt with optimization info
 """
+#struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
+#    data::VCData{T} # Type!?
+#    θ::Vector{T} #StaticArray
+#    Λ::Cholesky{T, Matrix{T}}
+#    μ::Vector{T}
+#    opt::VCOpt{T}
+#end
+
+#struct VCModel{T<:AbstractFloat, F<:Function} <:StatsBase.StatisticalModel
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
-    θ::Vector{T}
+    θ::Vector{T} # StaticArray?
     Λ::Cholesky{T, Matrix{T}}
     μ::Vector{T}
     opt::VCOpt{T}
+    invVX::Matrix{T}
+    #f::F
 end
 
 function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false) where T<:AbstractFloat
-    n = d.dims.n
+    n, p, _ = d.dims
     m = VCModel(
         d,
         θ,
-        cholesky(zeros(T, n, n) + I),
+        #cholesky(zeros(T, n, n) + I),
+        Cholesky(zeros(T, n, n), :U, 0),
         zeros(T, n),
-        VCOpt(:LN_BOBYQA, copy(θ), θ_lb, reml)
+        VCOpt(:LN_BOBYQA, copy(θ), θ_lb, reml),
+        zeros(T, n, p)
         )
     update!(m, m.θ) # Gjør et update her?
     m.opt.finitial = objective(m)
@@ -53,11 +66,12 @@ function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false
     m
 end
 
-function VCModel(d::VCData, θ_lb::Vector{<:AbstractFloat},  reml::Bool = false)
+function VCModel(d::VCData, θ_lb::Vector{<:AbstractFloat}, reml::Bool = false)
     VCModel(
     d,
     initialvalues(d),
     θ_lb,
+    #(θ::Vector{T}) -> θ, # identity
     reml
     )
 end
@@ -72,8 +86,8 @@ end
 
 isreml(m::VCModel) = m.opt.reml
 
-transform(m::StatisticalModel) = m.θ
-
+#transform(m::StatisticalModel) = m.θ
+transform(m::VCModel) = m.θ
 transform(θ::Vector) = θ
 
 function update!(m::VCModel, θ::Vector)
@@ -87,10 +101,11 @@ function setθ!(m::VCModel, θ::Vector)
 end
 
 function updateΛ!(m::VCModel)
-    δ = transform(m)
+    #δ = transform(m)
+    δ = transform(m.θ)
     Λfac = m.Λ.factors 
     fill!(Λfac, zero(eltype(δ)))
-    for i ∈ 1:m.data.dims.q
+    @inbounds for i ∈ 1:m.data.dims.q
         muladduppertri!(Λfac, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
     cholesky!(Symmetric(Λfac, :U), check = false) # Update the cholesky factorization object (Tar mest tid)
@@ -109,11 +124,14 @@ end
 #end
 
 # Generalized least squares for β
-# Pawitan p. 440 (X'V^-1X)β = X'V^-1y
+# Pawitan p. 440 (X'V⁻¹X)β = X'V⁻¹y
 # Allocates
 function updateμ!(m::VCModel)
     X = m.data.X
-    invVX = m.Λ \ X # V^-1X # allocations
+    invVX = m.invVX
+    ldiv!(invVX, m.Λ, X)
+    mul!(m.μ, X, ldiv!(cholesky!(Symmetric(X' * invVX)), (invVX' * m.data.y))) # Faster for larger p, but for some reason optim uses more itertions
+    #mul!(m.μ, X, Symmetric(X' * invVX) \ (invVX' * m.data.y))
     mul!(m.μ, X, (X' * invVX) \ (invVX' * m.data.y))
     m
 end
@@ -138,13 +156,14 @@ end
 # X' * V^-1 * X - It's computed in μ but cheap 
 function rml(m::VCModel)
     X = m.data.X
-    logdet(X' * (m.Λ \ X))
+    #logdet(X' * (m.Λ \ X))
+    X' * m.invVX
 end
 
 # -2 × log-likelihood
 function objective(m::VCModel)
     val = log(2π) * dfresidual(m) + logabsdet(m) + wrss(m)
-    isreml(m) ? val + rml(m) : val
+    isreml(m) ? val + logdet(rml(m)) : val
 end
 
 #function objectivep(m::VCModel)
