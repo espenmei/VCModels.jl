@@ -130,7 +130,7 @@ function updateμ!(m::VCModel)
     X = m.data.X
     invVX = m.invVX
     ldiv!(invVX, m.Λ, X)
-    mul!(m.μ, X, ldiv!(cholesky!(Symmetric(X' * invVX)), (invVX' * m.data.y))) # Faster for larger p, but for some reason optim uses more itertions
+    #mul!(m.μ, X, ldiv!(cholesky!(Symmetric(X' * invVX)), (invVX' * m.data.y))) # Faster for larger p, but for some reason optim uses more itertions
     #mul!(m.μ, X, Symmetric(X' * invVX) \ (invVX' * m.data.y))
     mul!(m.μ, X, (X' * invVX) \ (invVX' * m.data.y))
     m
