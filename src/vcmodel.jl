@@ -87,7 +87,7 @@ end
 isreml(m::VCModel) = m.opt.reml
 
 #transform(m::StatisticalModel) = m.θ
-transform(m::VCModel) = m.θ
+transform(m::VCModel) = transform(m.θ)
 transform(θ::Vector) = θ
 
 function update!(m::VCModel, θ::Vector)
