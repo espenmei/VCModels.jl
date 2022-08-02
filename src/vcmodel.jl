@@ -1,3 +1,19 @@
+struct VCCache{T<:AbstractFloat} 
+    invVX::Matrix{T} # n × p
+    XtinvVX::Matrix{T} # p × p
+    β::Vector{T} # p XtinvVy -> β
+    ϵ::Vector{T} # n
+end
+
+function VCCache(n, p, T)
+    VCCache(
+        zeros(T, n, p),
+        zeros(T, p, p),
+        zeros(T, p),
+        zeros(T, n)
+        )
+end
+ 
 """
 `VCData` holds input data of a variance component model
 # Fields
@@ -52,9 +68,8 @@ function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false
     n, p, _ = d.dims
     m = VCModel(
         d,
-        θ,
-        #cholesky(zeros(T, n, n) + I),
-        Cholesky(zeros(T, n, n), :U, 0),
+        copy(θ), # Make a copy to avoid modifying input
+        Cholesky(zeros(T, n, n), :U, 0), # cholesky(zeros(T, n, n) + I),
         zeros(T, n),
         VCOpt(:LN_BOBYQA, copy(θ), θ_lb, reml),
         zeros(T, n, p)
@@ -89,9 +104,15 @@ isreml(m::VCModel) = m.opt.reml
 #transform(m::StatisticalModel) = m.θ
 transform(m::VCModel) = transform(m.θ)
 transform(θ::Vector) = θ
+#transform!(δ::Vector, θ::Vector) = copyto!(δ, θ)
 
 function update!(m::VCModel, θ::Vector)
     updateμ!(updateΛ!(setθ!(m, θ)))
+    m
+end
+
+function update!(m::VCModel, θ::Vector, c::VCCache)
+    updateμ!(updateΛ!(setθ!(m, θ)), c)
     m
 end
 
@@ -101,7 +122,6 @@ function setθ!(m::VCModel, θ::Vector)
 end
 
 function updateΛ!(m::VCModel)
-    #δ = transform(m)
     δ = transform(m.θ)
     Λfac = m.Λ.factors 
     fill!(Λfac, zero(eltype(δ)))
@@ -132,7 +152,20 @@ function updateμ!(m::VCModel)
     ldiv!(invVX, m.Λ, X)
     #mul!(m.μ, X, ldiv!(cholesky!(Symmetric(X' * invVX)), (invVX' * m.data.y))) # Faster for larger p, but for some reason optim uses more itertions
     #mul!(m.μ, X, Symmetric(X' * invVX) \ (invVX' * m.data.y))
+    # P/H = X, (X' * invVX) \ (invVX') -> "Hat matrix"
     mul!(m.μ, X, (X' * invVX) \ (invVX' * m.data.y))
+    m
+end
+
+function updateμ!(m::VCModel, c::VCCache)
+    X = m.data.X
+    invVX = c.invVX
+    println(@allocated ldiv!(invVX, m.Λ, X))
+    println(@allocated mul!(c.XtinvVX, X', invVX))
+    println(@allocated mul!(c.β, invVX', m.data.y))
+    println(@allocated c.β .= Symmetric(c.XtinvVX) \ c.β)
+    #ldiv!(factorize(Symmetric(c.XtinvVX)), c.β)
+    println(@allocated mul!(m.μ, X, c.β))
     m
 end
 
@@ -147,7 +180,7 @@ end
 # Same as y'Py in Lynch & Walsh
 # Same as trace(V^-1 * (y - Xβ)(y - Xβ)')
 function wrss(m::VCModel)
-    ϵ = m.data.y - m.μ
+    ϵ = m.data.y - m.μ # Allocates
     dot(ϵ, m.Λ \ ϵ)
 end
 
@@ -234,10 +267,13 @@ function fit!(m::VCModel)
     # Det er jo egentlig gjort ett update når modellen ble laget. Men da må du stole på at modellen ikke har blitt klussa med.
     function obj(θ::Vector, g)
         val = objective(update!(m, θ))
+        #val = objective(update!(m, θ, c))
         update!(m.opt, θ, val)
         showiter(m.opt)
         val
     end
+    n, p = size(m.data.X)
+    #c = VCCache(n, p, eltype(m.data.X)) #
     opt = Opt(m.opt)
     min_objective!(opt, obj)
     minf, minx, ret = optimize!(opt, m.θ)
