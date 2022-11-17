@@ -1,19 +1,3 @@
-struct VCCache{T<:AbstractFloat} 
-    invVX::Matrix{T} # n × p
-    XtinvVX::Matrix{T} # p × p
-    β::Vector{T} # p XtinvVy -> β
-    ϵ::Vector{T} # n
-end
-
-function VCCache(n, p, T)
-    VCCache(
-        zeros(T, n, p),
-        zeros(T, p, p),
-        zeros(T, p),
-        zeros(T, n)
-        )
-end
- 
 """
 `VCData` holds input data of a variance component model
 # Fields
@@ -45,15 +29,6 @@ end
 - `μ`: 'n' vector of model implied means
 - `opt`: VCOpt with optimization info
 """
-#struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
-#    data::VCData{T} # Type!?
-#    θ::Vector{T} #StaticArray
-#    Λ::Cholesky{T, Matrix{T}}
-#    μ::Vector{T}
-#    opt::VCOpt{T}
-#end
-
-#struct VCModel{T<:AbstractFloat, F<:Function} <:StatsBase.StatisticalModel
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
     θ::Vector{T} # StaticArray?
@@ -100,7 +75,6 @@ function initialvalues(d::VCData)
 end
 
 isreml(m::VCModel) = m.opt.reml
-
 #transform(m::StatisticalModel) = m.θ
 transform(m::VCModel) = transform(m.θ)
 transform(θ::Vector) = θ
@@ -111,11 +85,6 @@ function update!(m::VCModel, θ::Vector)
     m
 end
 
-function update!(m::VCModel, θ::Vector, c::VCCache)
-    updateμ!(updateΛ!(setθ!(m, θ)), c)
-    m
-end
-
 function setθ!(m::VCModel, θ::Vector)
     copyto!(m.θ, θ)
     m
@@ -123,8 +92,10 @@ end
 
 function updateΛ!(m::VCModel)
     δ = transform(m.θ)
+    #δ = m.θ
     Λfac = m.Λ.factors 
     fill!(Λfac, zero(eltype(δ)))
+    #copyto!(m.Λ.factors, I)
     @inbounds for i ∈ 1:m.data.dims.q
         muladduppertri!(Λfac, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
@@ -132,16 +103,6 @@ function updateΛ!(m::VCModel)
     # Can be harder to debug withut check
     m
 end
-
-#function updateΛp!(m::VCModel)    
-#    δ = transform(m)
-#    copyto!(m.Λ.factors, I)
-#    for i ∈ 1:m.data.dims.q
-#        scaleUpperTri!(m.Λ.factors, δ[i], m.data.r[i])
-#    end
-#    cholesky!(Symmetric(m.Λ.factors, :U))
-#    m
-#end
 
 # Generalized least squares for β
 # Pawitan p. 440 (X'V⁻¹X)β = X'V⁻¹y
@@ -154,18 +115,6 @@ function updateμ!(m::VCModel)
     #mul!(m.μ, X, Symmetric(X' * invVX) \ (invVX' * m.data.y))
     # P/H = X, (X' * invVX) \ (invVX') -> "Hat matrix"
     mul!(m.μ, X, (X' * invVX) \ (invVX' * m.data.y))
-    m
-end
-
-function updateμ!(m::VCModel, c::VCCache)
-    X = m.data.X
-    invVX = c.invVX
-    println(@allocated ldiv!(invVX, m.Λ, X))
-    println(@allocated mul!(c.XtinvVX, X', invVX))
-    println(@allocated mul!(c.β, invVX', m.data.y))
-    println(@allocated c.β .= Symmetric(c.XtinvVX) \ c.β)
-    #ldiv!(factorize(Symmetric(c.XtinvVX)), c.β)
-    println(@allocated mul!(m.μ, X, c.β))
     m
 end
 
@@ -196,13 +145,8 @@ end
 # -2 × log-likelihood
 function objective(m::VCModel)
     val = log(2π) * dfresidual(m) + logabsdet(m) + wrss(m)
-    isreml(m) ? val + logdet(rml(m)) : val
+    isreml(m) ? val + logabsdet(rml(m))[1] : val
 end
-
-#function objectivep(m::VCModel)
-#    n = m.data.dims.n
-#    logdet(m.Λ) + n * (1.0 + log(2π) + log(wrss(m) / n))
-#end
 
 # covariance of fixed effects
 # Same as reml so make one X' * (m.Λ \ X) function 

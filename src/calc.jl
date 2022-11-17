@@ -10,6 +10,7 @@ function hessian!(H::Matrix, m::VCModel)
         val
     end
     m_tmp = deepcopy(m) # Finitediff kødder med med m under vurdering, så lag en kopi av alt og la den kødde der
+    # Bedre å lage en ny modell?
     # Det er mulig FD har en funksjon som ikke overskriver
     FiniteDiff.finite_difference_hessian!(H, obj, copy(m.θ))
     H
