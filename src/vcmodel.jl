@@ -9,7 +9,7 @@
 struct VCData{T<:AbstractFloat} 
     y::Vector{T}
     X::Matrix{T}
-    r::Vector{<:AbstractMatrix} # Vector{<:AbstractMatrix{T}} Doesn't allow Float32 for A. Now it is not typestable. Abstract because they can be of different types, Symmetric, Diagonal, maybe also sparse? Change to tuple
+    r::Vector{<:AbstractMatrix} # Change to tuple
     dims::NamedTuple{(:n, :p, :q), NTuple{3, Int}}
 end
 
@@ -32,6 +32,7 @@ end
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
     θ::Vector{T} # StaticArray?
+    δ::Vector{T}
     Λ::Cholesky{T, Matrix{T}}
     μ::Vector{T}
     opt::VCOpt{T}
@@ -44,6 +45,7 @@ function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false
     m = VCModel(
         d,
         copy(θ), # Make a copy to avoid modifying input
+        copy(θ),
         Cholesky(zeros(T, n, n), :U, 0), # cholesky(zeros(T, n, n) + I),
         zeros(T, n),
         VCOpt(:LN_BOBYQA, copy(θ), θ_lb, reml),
@@ -75,10 +77,8 @@ function initialvalues(d::VCData)
 end
 
 isreml(m::VCModel) = m.opt.reml
-#transform(m::StatisticalModel) = m.θ
-transform(m::VCModel) = transform(m.θ)
-transform(θ::Vector) = θ
-#transform!(δ::Vector, θ::Vector) = copyto!(δ, θ)
+transform(θ::Vector) = transform!(similar(θ), θ)
+transform!(δ::Vector, θ::Vector) = copyto!(δ, θ)
 
 function update!(m::VCModel, θ::Vector)
     updateμ!(updateΛ!(setθ!(m, θ)))
@@ -91,11 +91,10 @@ function setθ!(m::VCModel, θ::Vector)
 end
 
 function updateΛ!(m::VCModel)
-    δ = transform(m.θ)
-    #δ = m.θ
+    δ = m.δ
+    transform!(δ, m.θ)
     Λfac = m.Λ.factors 
     fill!(Λfac, zero(eltype(δ)))
-    #copyto!(m.Λ.factors, I)
     @inbounds for i ∈ 1:m.data.dims.q
         muladduppertri!(Λfac, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
@@ -104,18 +103,16 @@ function updateΛ!(m::VCModel)
     m
 end
 
-# Generalized least squares for β
-# Pawitan p. 440 (X'V⁻¹X)β = X'V⁻¹y
+# GLS for β - Pawitan p. 440 (X'V⁻¹X)β = X'V⁻¹y
 # Allocates
 function updateμ!(m::VCModel)
     X = m.data.X
     invVX = m.invVX
     ldiv!(invVX, m.Λ, X)
     #mul!(m.μ, X, ldiv!(cholesky!(Symmetric(X' * invVX)), (invVX' * m.data.y))) # Faster for larger p, but for some reason optim uses more itertions
-    #mul!(m.μ, X, Symmetric(X' * invVX) \ (invVX' * m.data.y))
     # P/H = X, (X' * invVX) \ (invVX') -> "Hat matrix"
-    mul!(m.μ, X, (X' * invVX) \ (invVX' * m.data.y))
-    m
+    β = Symmetric(X'invVX) \ (invVX'm.data.y)
+    mul!(m.μ, X, β)
 end
 
 function dfresidual(m::VCModel)::Int
@@ -127,7 +124,7 @@ end
 # Weighted residual sums of squares
 # (y - Xβ)'V^-1(y - Xβ)
 # Same as y'Py in Lynch & Walsh
-# Same as trace(V^-1 * (y - Xβ)(y - Xβ)')
+# Same as trace(V^-1(y - Xβ)(y - Xβ)')
 function wrss(m::VCModel)
     ϵ = m.data.y - m.μ # Allocates
     dot(ϵ, m.Λ \ ϵ)
@@ -179,19 +176,18 @@ function fixef(m::VCModel{T}) where T
     fixef!(zeros(T, m.data.dims.p), m)
 end
 
-# Posterior means for u
-function ranef!(w::Matrix{T}, m::VCModel{T}) where T
-    δ = transform(m)
+function ranef!(W::Matrix, m::VCModel)
+    δ = transform(m.θ)
     invVϵ = m.Λ \ (m.data.y - m.μ) # V^-1(y - Xβ) 
-    for i in 1:m.data.dims.q
-        w[:, i] = δ[i] * m.data.r[i] * invVϵ
+    for i ∈ 1:m.data.dims.q
+        W[:, i] = δ[i] * m.data.r[i] * invVϵ
     end
-    w
+    W
 end
 
 function ranef(m::VCModel{T}) where T
-    w = zeros(T, m.data.dims.n, m.data.dims.q)
-    ranef!(w, m)
+    W = zeros(T, m.data.dims.n, m.data.dims.q)
+    ranef!(W, m)
 end
 
 function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bool=false)
@@ -282,7 +278,7 @@ end
 function Base.show(io::IO, m::VCModel)
     if m.opt.feval <= 0
         @warn("This model has not been fitted.")
-        return nothing
+        #return nothing
     end
     # Fit measures
     oo = objective(m)
