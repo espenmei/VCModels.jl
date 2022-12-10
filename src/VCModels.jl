@@ -7,6 +7,7 @@ using FiniteDiff
 using JLD
 using LinearAlgebra
 using NLopt
+using StatsAPI
 using StatsBase
 using StatsModels
 

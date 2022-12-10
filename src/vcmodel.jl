@@ -31,7 +31,7 @@ end
 """
 struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     data::VCData{T} # Type!?
-    θ::Vector{T} # StaticArray?
+    θ::Vector{T}
     δ::Vector{T}
     Λ::Cholesky{T, Matrix{T}}
     μ::Vector{T}
@@ -127,7 +127,8 @@ end
 # Same as trace(V^-1(y - Xβ)(y - Xβ)')
 function wrss(m::VCModel)
     ϵ = m.data.y - m.μ # Allocates
-    dot(ϵ, m.Λ \ ϵ)
+    invVϵ = m.Λ \ ϵ 
+    dot(ϵ, invVϵ)
 end
 
 # Adjustment for reml likelihood
@@ -190,7 +191,10 @@ function ranef(m::VCModel{T}) where T
     ranef!(W, m)
 end
 
-function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bool=false)
+
+# Implements
+# StatsAPI
+function StatsAPI.fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bool=false)
     sch = schema(f, df)
     form = apply_schema(f, sch)
     y, X = modelcols(form, df)
@@ -200,7 +204,7 @@ function fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector, reml::Bo
     fit!(m)
 end
 
-function fit!(m::VCModel)
+function StatsAPI.fit!(m::VCModel)
     if m.opt.feval > 0
         throw(ArgumentError("This model has already been fitted"))
     end
@@ -224,11 +228,10 @@ function fit!(m::VCModel)
     m
 end
 
-# Implements
-# StatsBase
-StatsBase.coef(m::VCModel) = fixef(m)
 
-function StatsBase.coeftable(m::VCModel)
+StatsAPI.coef(m::VCModel) = fixef(m)
+
+function StatsAPI.coeftable(m::VCModel)
     co = fixef(m)
     se = stderror(m)
     z = co ./ se
@@ -240,20 +243,22 @@ function StatsBase.coeftable(m::VCModel)
     ["Coef.", "Std. Error", "z", "Pr(>|z|)"], # Colnames
     names, # rownames
     4, # pvalcol
-    3,  # zcol
+    3, # zcol
     )
 end
 
-StatsBase.deviance(m::VCModel) = objective(m)
+StatsAPI.deviance(m::VCModel) = objective(m)
 
-StatsBase.dof(m::VCModel) = m.data.dims.p + m.data.dims.q
-
-function StatsBase.dof_residual(m::VCModel)::Int
-    m.data.dims.n - m.data.dims.p - m.data.dims.q
-end
+StatsAPI.dof(m::VCModel) = m.data.dims.p + m.data.dims.q
 
 # Error for reml?
-StatsBase.loglikelihood(m::VCModel) = -0.5 * objective(m)
+StatsAPI.loglikelihood(m::VCModel) = -0.5 * objective(m)
+
+# StatsBase
+function StatsBase.dof_residual(m::VCModel)::Int
+    n, p, q = m.data.dims
+    n - p - q
+end
 
 StatsBase.modelmatrix(m::VCModel) = m.data.X
 
