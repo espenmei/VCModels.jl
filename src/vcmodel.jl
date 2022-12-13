@@ -11,13 +11,19 @@ struct VCData{T<:AbstractFloat}
     X::Matrix{T}
     r::Vector{<:AbstractMatrix} # Change to tuple
     dims::NamedTuple{(:n, :p, :q), NTuple{3, Int}}
+    nms::Tuple
 end
 
-function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where T<:AbstractFloat
+function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}, nms) where T<:AbstractFloat
     X = reshape(X, :, size(X, 2)) # Make sure X is a matrix
     n, p = size(X)
     dims = (n = n, p = p, q = length(r))
-    VCData(y, X, r, dims)
+    VCData(y, X, r, dims, nms)
+end
+
+function VCData(y::Vector{T}, X::VecOrMat{T}, r::Vector{<:AbstractMatrix}) where T<:AbstractFloat
+    nms = ("y", "x" .* string.(1:size(X, 2)))
+    VCData(y, X, r, nms)
 end
 
 """
@@ -198,7 +204,8 @@ function StatsAPI.fit(::Type{VCModel}, f::FormulaTerm, df::DataFrame, r::Vector,
     sch = schema(f, df)
     form = apply_schema(f, sch)
     y, X = modelcols(form, df)
-    d = VCData(y, X, r)
+    nms = coefnames(form)
+    d = VCData(y, X, r, nms)
     θ_lb = fill(0.0, length(r))
     m = VCModel(d, θ_lb, reml)
     fit!(m)
@@ -236,12 +243,12 @@ function StatsAPI.coeftable(m::VCModel)
     se = stderror(m)
     z = co ./ se
     pval = ccdf.(Chisq(1), abs2.(z))
-    names = "x".*string.(1:length(co))
+    xnms = m.data.nms[2]
     tab = hcat(co, se, z, pval)
     CoefTable(
     tab, # value cols
     ["Coef.", "Std. Error", "z", "Pr(>|z|)"], # Colnames
-    names, # rownames
+    xnms, # rownames
     4, # pvalcol
     3, # zcol
     )
