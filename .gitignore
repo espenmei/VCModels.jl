@@ -4,4 +4,4 @@ div/
 src/algorithms.jl
 init.jl
 init_trio.jl
-notes.jl
+data/sim_trio.R
