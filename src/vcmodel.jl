@@ -104,7 +104,7 @@ function updateΛ!(m::VCModel)
     @inbounds for i ∈ 1:m.data.dims.q
         muladduppertri!(Λfac, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
     end
-    cholesky!(Symmetric(Λfac, :U), check = false) # Update the cholesky factorization object (Tar mest tid)
+    cholesky!(Symmetric(Λfac, :U), check = false) # Compute the cholesky factorization object (Tar mest tid)
     # Can be harder to debug withut check
     m
 end
@@ -112,12 +112,12 @@ end
 # GLS for β - Pawitan p. 440 (X'V⁻¹X)β = X'V⁻¹y
 # Allocates
 function updateμ!(m::VCModel)
-    X = m.data.X
+    y, X = m.data.y, m.data.X
     invVX = m.invVX
     ldiv!(invVX, m.Λ, X)
-    #mul!(m.μ, X, ldiv!(cholesky!(Symmetric(X' * invVX)), (invVX' * m.data.y))) # Faster for larger p, but for some reason optim uses more itertions
+    #mul!(m.μ, X, ldiv!(cholesky!(Symmetric(X'invVX)), (invVX'y))) # Faster for larger p, but for some reason optim uses more itertions
     # P/H = X, (X' * invVX) \ (invVX') -> "Hat matrix"
-    β = Symmetric(X'invVX) \ (invVX'm.data.y)
+    β = Symmetric(X'invVX) \ (invVX'y)
     mul!(m.μ, X, β)
 end
 
@@ -141,9 +141,8 @@ end
 # Pawitan p. 441
 # X' * V^-1 * X - It's computed in μ but cheap 
 function rml(m::VCModel)
-    X = m.data.X
     #logdet(X' * (m.Λ \ X))
-    X' * m.invVX
+    m.data.X'm.invVX
 end
 
 # -2 × log-likelihood
@@ -290,7 +289,7 @@ end
 function Base.show(io::IO, m::VCModel)
     if m.opt.feval <= 0
         @warn("This model has not been fitted.")
-        #return nothing
+        return nothing
     end
     # Fit measures
     oo = objective(m)
