@@ -10,6 +10,7 @@
 #end
 
 # Symmetric Tag slows this down. Is it the indexing?
+# Antakeligvis fordi den lagrer :U. Så iterer heler den.
 function muladduppertri!(C::AbstractMatrix{T}, α::Number, B::AbstractMatrix{T}) where {T<:AbstractFloat}
     for i ∈ 1:size(C, 2)
         for j ∈ 1:i
