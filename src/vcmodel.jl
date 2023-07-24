@@ -52,7 +52,7 @@ function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false
         d,
         copy(θ), # Make a copy to avoid modifying input
         copy(θ),
-        Cholesky(zeros(T, n, n), :U, 0), # cholesky(zeros(T, n, n) + I),
+        Cholesky(zeros(T, n, n), :U, 0),
         zeros(T, n),
         VCOpt(:LN_BOBYQA, copy(θ), θ_lb, reml),
         zeros(T, n, p)
@@ -102,7 +102,7 @@ function updateΛ!(m::VCModel)
     Λfac = m.Λ.factors 
     fill!(Λfac, zero(eltype(δ)))
     @inbounds for i ∈ 1:m.data.dims.q
-        muladduppertri!(Λfac, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1)
+        muladduppertri!(Λfac, δ[i], m.data.r[i]) #mul!(m.Λ.factors, δ[i], m.data.r[i], 1, 1) axpy!(δ[i], m.data.r[i], Λfac)
     end
     cholesky!(Symmetric(Λfac, :U), check = false) # Compute the cholesky factorization object (Tar mest tid)
     # Can be harder to debug withut check
@@ -142,7 +142,7 @@ end
 # X' * V^-1 * X - It's computed in μ but cheap 
 function rml(m::VCModel)
     #logdet(X' * (m.Λ \ X))
-    m.data.X'm.invVX
+    m.data.X'm.invVX # fail if not X full rank
 end
 
 # -2 × log-likelihood
