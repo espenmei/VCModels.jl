@@ -2,6 +2,7 @@
 text/
 div/
 src/algorithms.jl
+src/fileIO.jl
 init.jl
 init_trio.jl
 code_data.jl
