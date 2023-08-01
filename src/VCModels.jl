@@ -4,7 +4,6 @@ using Base: Ryu
 using DataFrames: DataFrame
 using Distributions
 using FiniteDiff
-using JLD
 using LinearAlgebra
 using NLopt
 using StatsAPI
@@ -61,6 +60,6 @@ include("vcmodel.jl")
 #include("algorithms.jl")
 include("calc.jl")
 include("linalg.jl")
-include("fileIO.jl")
+#include("fileIO.jl")
 
 end # module
