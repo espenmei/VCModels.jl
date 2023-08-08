@@ -40,10 +40,10 @@ struct VCModel{T<:AbstractFloat} <:StatsBase.StatisticalModel
     θ::Vector{T}
     δ::Vector{T}
     Λ::Cholesky{T, Matrix{T}}
+    β::Vector{T}
     μ::Vector{T}
     opt::VCOpt{T}
     invVX::Matrix{T}
-    #f::F
 end
 
 function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false) where T<:AbstractFloat
@@ -53,6 +53,7 @@ function VCModel(d::VCData, θ::Vector{T},  θ_lb::Vector{T}, reml::Bool = false
         copy(θ), # Make a copy to avoid modifying input
         copy(θ),
         Cholesky(zeros(T, n, n), :U, 0),
+        zeros(T, p),
         zeros(T, n),
         VCOpt(:LN_BOBYQA, copy(θ), θ_lb, reml),
         zeros(T, n, p)
@@ -114,10 +115,12 @@ end
 function updateμ!(m::VCModel)
     y, X = m.data.y, m.data.X
     invVX = m.invVX
+    β = m.β
     ldiv!(invVX, m.Λ, X)
-    #mul!(m.μ, X, ldiv!(cholesky!(Symmetric(X'invVX)), (invVX'y))) # Faster for larger p, but for some reason optim uses more itertions
     # P/H = X, (X' * invVX) \ (invVX') -> "Hat matrix"
-    β = Symmetric(X'invVX) \ (invVX'y)
+    mul!(β, invVX', y)
+    ldiv!(bunchkaufman!(Symmetric(X'invVX)), β)
+    #β = Symmetric(X'invVX) \ (invVX'y)
     mul!(m.μ, X, β)
 end
 
@@ -141,8 +144,7 @@ end
 # Pawitan p. 441
 # X' * V^-1 * X - It's computed in μ but cheap 
 function rml(m::VCModel)
-    #logdet(X' * (m.Λ \ X))
-    m.data.X'm.invVX # fail if not X full rank
+    m.data.X'm.invVX # logdet will give -Inf if not X full rank
 end
 
 # -2 × log-likelihood
@@ -217,13 +219,10 @@ function StatsAPI.fit!(m::VCModel)
     # Det er jo egentlig gjort ett update når modellen ble laget. Men da må du stole på at modellen ikke har blitt klussa med.
     function obj(θ::Vector, g)
         val = objective(update!(m, θ))
-        #val = objective(update!(m, θ, c))
         update!(m.opt, θ, val)
         showiter(m.opt)
         val
     end
-    n, p = size(m.data.X)
-    #c = VCCache(n, p, eltype(m.data.X)) #
     opt = Opt(m.opt)
     min_objective!(opt, obj)
     minf, minx, ret = optimize!(opt, m.θ)
@@ -277,7 +276,6 @@ StatsBase.response(m::VCModel) = m.data.y
 function StatsModels.isnested(m1::VCModel, m2::VCModel; atol::Real = 0.0)
     response = m1.data.y == m2.data.y
     criterion = m1.opt.reml == m2.opt.reml
-    #rterms = issubset(m1.data.r, m2.data.r)
     fterms = issubset(m1.data.X, m2.data.X)
     if m1.opt.reml && m2.opt.reml
         fterms = m1.data.X == m2.data.X
@@ -311,7 +309,7 @@ function Base.show(io::IO, m::VCModel)
         print(io, i, "\t")
     end
     println(io)
-    for i ∈ 1:length(vcvals)
+    for i ∈ eachindex(vcvals)
         print(io, "θ" * Char(0x2080 + i), "\t", vcvals[i], "\t", vcsevals[i], "\n")
     end
     # Fixed effects
