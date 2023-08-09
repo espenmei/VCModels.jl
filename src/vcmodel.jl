@@ -111,7 +111,6 @@ function updateΛ!(m::VCModel)
 end
 
 # GLS for β - Pawitan p. 440 (X'V⁻¹X)β = X'V⁻¹y
-# Allocates
 function updateμ!(m::VCModel)
     y, X = m.data.y, m.data.X
     invVX = m.invVX
@@ -150,7 +149,7 @@ end
 # -2 × log-likelihood
 function objective(m::VCModel)
     val = log(2π) * dfresidual(m) + logabsdet(m) + wrss(m)
-    isreml(m) ? val + logabsdet(rml(m))[1] : val
+    isreml(m) ? val + first(logabsdet(rml(m))) : val
 end
 
 # covariance of fixed effects
